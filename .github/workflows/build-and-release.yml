@@ -68,6 +68,7 @@ jobs:
       run: |
         mkdir release
         copy target\flAICheckBot.exe release\
+        copy target\flAICheckBot.exe .
         xcopy target\lib release\lib\ /E /I
         xcopy src\ai release\ai\ /E /I
         copy start_engine.bat release\
@@ -81,12 +82,12 @@ jobs:
         directory: 'release'
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v4
       with:
         name: build-artifacts
         path: |
           flAICheckBot-windows-x64.zip
-          target/flAICheckBot.exe
+          flAICheckBot.exe
 
   release:
     needs: build
@@ -94,9 +95,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Download Artifacts
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v4
       with:
         name: build-artifacts
+
+    - name: List Files (Debug)
+      run: ls -R
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
