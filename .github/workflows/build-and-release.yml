@@ -38,13 +38,13 @@ jobs:
           <servers>
             <server>
               <id>github</id>
-              <username>x-access-token</username>
-              <password>${{ secrets.GITHUB_TOKEN }}</password>
+              <username>TiJaWo68</username>
+              <password>${{ secrets.PAT_TOKEN }}</password>
             </server>
             <server>
               <id>github-sdp</id>
-              <username>x-access-token</username>
-              <password>${{ secrets.GITHUB_TOKEN }}</password>
+              <username>TiJaWo68</username>
+              <password>${{ secrets.PAT_TOKEN }}</password>
             </server>
           </servers>
         </settings>
