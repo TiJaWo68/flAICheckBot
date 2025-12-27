@@ -30,17 +30,28 @@ public class AiProcessManager {
         if (envPython != null) {
             this.pythonPath = envPython;
         } else {
-            // Priority: 1. Root .venv, 2. Legacy src/ai/venv
-            File rootVenv = new File(".venv/bin/python");
+            boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+            String venvSubDir = isWindows ? "Scripts" : "bin";
+            String pythonExec = isWindows ? "python.exe" : "python";
+
+            // Priority: 1. Root .venv, 2. AI-local venv
+            File rootVenv = new File(".venv/" + venvSubDir + "/" + pythonExec);
             if (rootVenv.exists()) {
                 this.pythonPath = rootVenv.getAbsolutePath();
             } else {
-                this.pythonPath = new File(aiDir, "venv/bin/python").getAbsolutePath();
+                File localVenv = new File(aiDir, "venv/" + venvSubDir + "/" + pythonExec);
+                if (localVenv.exists()) {
+                    this.pythonPath = localVenv.getAbsolutePath();
+                } else {
+                    // Final fallback: global python
+                    this.pythonPath = pythonExec;
+                }
             }
         }
         this.scriptPath = new File(aiDir, "icr_prototype.py").getAbsolutePath();
 
-        logger.info("KI-Engine paths initialized. Home: {}, Python: {}", aiDir.getAbsolutePath(), pythonPath);
+        logger.info("KI-Engine paths initialized. Home: {}, Python: {}, Script: {}", aiDir.getAbsolutePath(),
+                pythonPath, scriptPath);
     }
 
     private File findAiDir() {

@@ -32,6 +32,8 @@ jobs:
         mkdir release
         copy target\flAICheckBot.exe release\
         xcopy target\lib release\lib\ /E /I
+        xcopy src\ai release\ai\ /E /I
+        copy start_engine.bat release\
         copy README.md release\
 
     - name: Archive Release
