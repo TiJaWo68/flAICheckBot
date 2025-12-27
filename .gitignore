@@ -13,3 +13,9 @@ __pycache__/
 .DS_Store
 *.db
 !schema.sql
+/.tokens/
+/.vscode/
+/client_secret.json
+/dependency-reduced-pom.xml
+/exported_samples/
+/log/
