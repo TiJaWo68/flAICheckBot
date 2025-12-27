@@ -75,11 +75,9 @@ jobs:
         copy README.md release\
 
     - name: Archive Release
-      uses: thedoctor0/zip-release@0.7.6
-      with:
-        type: 'zip'
-        filename: 'flAICheckBot-windows-x64.zip'
-        directory: 'release'
+      shell: pwsh
+      run: |
+        Compress-Archive -Path release\* -DestinationPath flAICheckBot-windows-x64.zip -Force
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
@@ -98,6 +96,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: build-artifacts
+        path: .
 
     - name: List Files (Debug)
       run: ls -R
