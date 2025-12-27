@@ -21,9 +21,8 @@ import cv2
 import numpy as np
 from fastapi import Response, Form
 import json
-import vertexai
-from vertexai.generative_models import GenerativeModel
-from google.oauth2 import credentials as google_credentials
+from google import genai
+from google.genai import types
 
 DB_PATH = "../../flaicheckbot.db"
 ADAPTER_PATH = "./trocr-adapter"
@@ -36,12 +35,13 @@ PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", "flaicheckbot-project") # Placeholde
 LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
 
 try:
-    vertexai.init(project=PROJECT_ID, location=LOCATION)
-    vertex_model = GenerativeModel("gemini-2.0-flash")
-    print(f"Vertex AI initialized (Project: {PROJECT_ID}, Location: {LOCATION})")
+    # New SDK initialization
+    vertex_client = genai.Client(project=PROJECT_ID, location=LOCATION, vertexai=True)
+    vertex_model_name = "gemini-2.0-flash"
+    print(f"Vertex AI (google-genai) initialized (Project: {PROJECT_ID}, Location: {LOCATION})")
 except Exception as e:
-    print(f"Warning: Failed to initialize Vertex AI: {e}")
-    vertex_model = None
+    print(f"Warning: Failed to initialize Vertex AI Client: {e}")
+    vertex_client = None
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -322,22 +322,23 @@ async def grade_vertex(task: str = Form(...), expected: str = Form(""), actual: 
         current_project = projectId if projectId else PROJECT_ID
         
         if token:
-            # Re-initialize Vertex AI with the provided token and project for this request
-            creds = google_credentials.Credentials(token)
-            vertexai.init(project=current_project, location=LOCATION, credentials=creds)
-            current_model = GenerativeModel("gemini-2.0-flash")
+            # Initialize Client with provided token
+            current_client = genai.Client(
+                project=current_project, 
+                location=LOCATION, 
+                vertexai=True,
+                credentials=types.Credentials(access_token=token)
+            )
+        elif projectId and projectId != PROJECT_ID:
+            # Initialize Client with specific project
+            current_client = genai.Client(project=projectId, location=LOCATION, vertexai=True)
         else:
-            # If no token, check if we need to re-init with specific project
-            if projectId and projectId != PROJECT_ID:
-                vertexai.init(project=projectId, location=LOCATION)
-                current_model = GenerativeModel("gemini-2.0-flash")
-            else:
-                current_model = vertex_model
+            current_client = vertex_client
 
-        if not current_model:
+        if not current_client:
             return {"status": "error", "message": "Vertex AI not initialized. Check Project ID and Authentication."}
 
-        # Construct the prompt for Gemini using the user's provided structure
+        # Construct the prompt
         prompt = f"""
 Du bist ein hochpräziser Korrektur-Assistent für Lehrkräfte. Deine Aufgabe ist die Korrektur eines kompletten Tests, der aus mehreren Einzelaufgaben besteht.
 
@@ -376,7 +377,13 @@ Antworten Sie ausschließlich im JSON-Format, wobei das obige Schema in das 'fee
 }}
 """
 
-        response = current_model.generate_content(prompt)
+        response = current_client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
         
         # Clean the response text (sometimes Gemini adds ```json ... ```)
         resp_text = response.text.strip()
