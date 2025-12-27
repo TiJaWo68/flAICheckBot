@@ -160,20 +160,73 @@
 		<plugins>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-shade-plugin</artifactId>
-				<version>3.6.0</version>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<version>3.6.1</version>
 				<executions>
 					<execution>
+						<id>copy-dependencies</id>
 						<phase>package</phase>
 						<goals>
-							<goal>shade</goal>
+							<goal>copy-dependencies</goal>
 						</goals>
 						<configuration>
-							<transformers>
-								<transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-									<mainClass>de.in.flaicheckbot.MainApp</mainClass>
-								</transformer>
-							</transformers>
+							<outputDirectory>${project.build.directory}/lib</outputDirectory>
+							<overWriteReleases>false</overWriteReleases>
+							<overWriteSnapshots>false</overWriteSnapshots>
+							<overWriteIfNewer>true</overWriteIfNewer>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<version>3.4.1</version>
+				<configuration>
+					<archive>
+						<manifest>
+							<addClasspath>true</addClasspath>
+							<classpathPrefix>lib/</classpathPrefix>
+							<mainClass>de.in.flaicheckbot.MainApp</mainClass>
+						</manifest>
+					</archive>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>com.akathist.maven.plugins.launch4j</groupId>
+				<artifactId>launch4j-maven-plugin</artifactId>
+				<version>2.5.2</version>
+				<executions>
+					<execution>
+						<id>l4j-gui</id>
+						<phase>package</phase>
+						<goals>
+							<goal>launch4j</goal>
+						</goals>
+						<configuration>
+							<headerType>gui</headerType>
+							<outfile>${project.build.directory}/flAICheckBot.exe</outfile>
+							<jar>${project.build.directory}/${project.build.finalName}.jar</jar>
+							<errTitle>flAICheckBot Startup Error</errTitle>
+							<classPath>
+								<mainClass>de.in.flaicheckbot.MainApp</mainClass>
+							</classPath>
+							<icon>src/main/resources/images/app_icon.png</icon>
+							<jre>
+								<minVersion>21</minVersion>
+								<path>%JAVA_HOME%;%PATH%</path>
+							</jre>
+							<versionInfo>
+								<fileVersion>0.1.0.0</fileVersion>
+								<txtFileVersion>0.1.0.0</txtFileVersion>
+								<fileDescription>flAICheckBot - AI Foreign Language Assistant</fileDescription>
+								<copyright>TiJaWo68 @ 2025</copyright>
+								<productVersion>0.1.0.0</productVersion>
+								<txtProductVersion>0.1.0.0</txtProductVersion>
+								<productName>flAICheckBot</productName>
+								<internalName>flAICheckBot</internalName>
+								<originalFilename>flAICheckBot.exe</originalFilename>
+							</versionInfo>
 						</configuration>
 					</execution>
 				</executions>
