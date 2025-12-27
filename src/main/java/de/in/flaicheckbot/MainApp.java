@@ -107,7 +107,7 @@ public class MainApp {
 					});
 				}
 				aiManager.startEngine();
-				boolean ready = aiManager.waitForEngine(30);
+				boolean ready = aiManager.waitForEngine(60);
 				SwingUtilities.invokeLater(() -> {
 					if (ready) {
 						lblEngineStatus.setText("KI-Engine: Bereit ✅");
