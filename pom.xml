@@ -161,7 +161,7 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-dependency-plugin</artifactId>
-				<version>3.6.1</version>
+				<version>3.2.0</version>
 				<executions>
 					<execution>
 						<id>copy-dependencies</id>
@@ -181,7 +181,7 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-jar-plugin</artifactId>
-				<version>3.4.1</version>
+				<version>3.2.0</version>
 				<configuration>
 					<archive>
 						<manifest>
@@ -195,7 +195,7 @@
 			<plugin>
 				<groupId>com.akathist.maven.plugins.launch4j</groupId>
 				<artifactId>launch4j-maven-plugin</artifactId>
-				<version>2.5.2</version>
+				<version>2.4.1</version>
 				<executions>
 					<execution>
 						<id>l4j-gui</id>
@@ -207,14 +207,19 @@
 							<headerType>gui</headerType>
 							<outfile>${project.build.directory}/flAICheckBot.exe</outfile>
 							<jar>${project.build.directory}/${project.build.finalName}.jar</jar>
+							<dontWrapJar>false</dontWrapJar>
+							<stayAlive>true</stayAlive>
 							<errTitle>flAICheckBot Startup Error</errTitle>
+							<downloadUrl>https://adoptopenjdk.net/installation.html#x64_win-jre</downloadUrl>
 							<classPath>
 								<mainClass>de.in.flaicheckbot.MainApp</mainClass>
+								<jarLocation>lib/</jarLocation>
 							</classPath>
-							<icon>src/main/resources/images/app_icon.png</icon>
+							<!-- Launch4j requires an .ico file for the icon. PNG will cause windres errors on Linux. -->
+							<!-- <icon>src/main/resources/images/app_icon.ico</icon> -->
 							<jre>
+								<path>./jre</path>
 								<minVersion>21</minVersion>
-								<path>%JAVA_HOME%;%PATH%</path>
 							</jre>
 							<versionInfo>
 								<fileVersion>0.1.0.0</fileVersion>
