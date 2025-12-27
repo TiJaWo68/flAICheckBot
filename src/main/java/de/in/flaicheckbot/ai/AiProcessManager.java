@@ -25,10 +25,19 @@ public class AiProcessManager {
     public AiProcessManager() {
         this.aiDir = findAiDir();
 
-        // Use environment variables for overrides, otherwise use relative paths from
-        // aiDir
+        // Use environment variables for overrides, otherwise look for root .venv
         String envPython = System.getenv("FL_KI_PYTHON");
-        this.pythonPath = (envPython != null) ? envPython : new File(aiDir, "venv/bin/python").getAbsolutePath();
+        if (envPython != null) {
+            this.pythonPath = envPython;
+        } else {
+            // Priority: 1. Root .venv, 2. Legacy src/ai/venv
+            File rootVenv = new File(".venv/bin/python");
+            if (rootVenv.exists()) {
+                this.pythonPath = rootVenv.getAbsolutePath();
+            } else {
+                this.pythonPath = new File(aiDir, "venv/bin/python").getAbsolutePath();
+            }
+        }
         this.scriptPath = new File(aiDir, "icr_prototype.py").getAbsolutePath();
 
         logger.info("KI-Engine paths initialized. Home: {}, Python: {}", aiDir.getAbsolutePath(), pythonPath);
