@@ -1,0 +1,15 @@
+target/
+*.class
+.project
+.classpath
+.settings/
+.idea/
+*.iml
+*.log
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+*.db
+!schema.sql
