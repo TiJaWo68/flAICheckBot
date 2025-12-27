@@ -8,5 +8,8 @@ peft
 accelerate
 openai-whisper
 soundfile
+opencv-python
+google-cloud-aiplatform
+google-auth
 # Optional: bitsandbytes (for 4/8-bit LoRA, requires compatible hardware)
 # bitsandbytes
