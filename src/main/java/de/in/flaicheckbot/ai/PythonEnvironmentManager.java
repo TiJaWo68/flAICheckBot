@@ -78,14 +78,14 @@ public class PythonEnvironmentManager {
             listener.onProgress("Initialisiere Pip...", 60);
         downloadFile(GET_PIP_URL, getPipScript);
 
-        runPythonCommand(getPipScript.getAbsolutePath());
+        runPythonCommand(listener, 60, getPipScript.getAbsolutePath());
         getPipScript.delete();
 
         // 4. Install Requirements
         if (requirementsFile != null && requirementsFile.exists()) {
             if (listener != null)
                 listener.onProgress("Installiere KI-Abhängigkeiten (dies kann dauern)...", 80);
-            runPythonCommand("-m", "pip", "install", "-r", requirementsFile.getAbsolutePath());
+            runPythonCommand(listener, 80, "-m", "pip", "install", "-r", requirementsFile.getAbsolutePath());
         }
 
         if (listener != null)
@@ -152,7 +152,8 @@ public class PythonEnvironmentManager {
         }
     }
 
-    private void runPythonCommand(String... args) throws IOException, InterruptedException {
+    private void runPythonCommand(ProgressListener listener, int currentBasePercent, String... args)
+            throws IOException, InterruptedException {
         String[] command = new String[args.length + 1];
         command[0] = getPythonPath();
         System.arraycopy(args, 0, command, 1, args.length);
@@ -160,27 +161,50 @@ public class PythonEnvironmentManager {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(installDir);
 
-        // Don't inheritIO if we want to capture it, but for simplicity we'll capture
-        // error steam if it fails
+        // Combine stdout and stderr for single stream processing
+        pb.redirectErrorStream(true);
         Process p = pb.start();
 
-        // Capture output for better error reporting
-        StringBuilder output = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+        StringBuilder fullOutput = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                output.append("STDOUT: ").append(line).append("\n");
-            }
-            while ((line = errorReader.readLine()) != null) {
-                output.append("STDERR: ").append(line).append("\n");
+                fullOutput.append(line).append("\n");
+
+                // Extract meaningful snippets for the listener (e.g., from Pip)
+                if (listener != null) {
+                    processOutputLine(listener, currentBasePercent, line);
+                }
             }
         }
 
         int exitCode = p.waitFor();
         if (exitCode != 0) {
-            logger.error("Python command failed with exit code {}.\nOutput:\n{}", exitCode, output.toString());
+            logger.error("Python command failed with exit code {}.\nOutput:\n{}", exitCode, fullOutput.toString());
             throw new IOException("Python command failed with exit code " + exitCode);
+        }
+    }
+
+    private void processOutputLine(ProgressListener listener, int percent, String line) {
+        String cleanLine = line.trim();
+        if (cleanLine.isEmpty())
+            return;
+
+        // Simplify pip output for the user
+        if (cleanLine.startsWith("Collecting ")) {
+            listener.onProgress("Lade " + cleanLine.substring(11) + "...", percent);
+        } else if (cleanLine.startsWith("Installing collected packages:")) {
+            listener.onProgress("Installiere Pakete...", percent);
+        } else if (cleanLine.startsWith("Successfully installed")) {
+            listener.onProgress("Installation erfolgreich.", percent);
+        } else if (cleanLine.contains("Downloading")) {
+            // e.g. "Downloading torch-2.3.0..."
+            int idx = cleanLine.indexOf("Downloading");
+            String msg = cleanLine.substring(idx).split(" ")[1];
+            listener.onProgress("Lade " + msg + "...", percent);
+        } else if (cleanLine.length() < 60) {
+            // Fallback for short status lines
+            listener.onProgress(cleanLine, percent);
         }
     }
 
