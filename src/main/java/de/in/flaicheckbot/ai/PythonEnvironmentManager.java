@@ -98,12 +98,22 @@ public class PythonEnvironmentManager {
         File[] pthFiles = installDir.listFiles((dir, name) -> name.endsWith("._pth"));
         if (pthFiles != null && pthFiles.length > 0) {
             File pthFile = pthFiles[0];
-            String content = Files.readString(pthFile.toPath());
-            if (content.contains("#import site")) {
-                content = content.replace("#import site", "import site");
-                Files.writeString(pthFile.toPath(), content);
-                logger.info("Patched {}", pthFile.getName());
-            }
+
+            // For embeddable python, we need to add common paths and import site
+            StringBuilder sb = new StringBuilder();
+            sb.append(".\n");
+            sb.append("python" + PYTHON_VERSION.substring(0, 4).replace(".", "") + ".zip\n"); // e.g. python312.zip
+            sb.append("Lib\n");
+            sb.append("Lib/site-packages\n");
+            sb.append("\n");
+            sb.append("# Uncomment to run site.main() automatically\n");
+            sb.append("import site\n");
+
+            Files.writeString(pthFile.toPath(), sb.toString());
+            logger.info("Created robust patching for {}", pthFile.getName());
+
+            // Also ensure Lib/site-packages exists
+            new File(installDir, "Lib/site-packages").mkdirs();
         }
     }
 
@@ -141,10 +151,27 @@ public class PythonEnvironmentManager {
 
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(installDir);
-        pb.inheritIO();
+
+        // Don't inheritIO if we want to capture it, but for simplicity we'll capture
+        // error steam if it fails
         Process p = pb.start();
+
+        // Capture output for better error reporting
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                BufferedReader errorReader = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append("STDOUT: ").append(line).append("\n");
+            }
+            while ((line = errorReader.readLine()) != null) {
+                output.append("STDERR: ").append(line).append("\n");
+            }
+        }
+
         int exitCode = p.waitFor();
         if (exitCode != 0) {
+            logger.error("Python command failed with exit code {}.\nOutput:\n{}", exitCode, output.toString());
             throw new IOException("Python command failed with exit code " + exitCode);
         }
     }
