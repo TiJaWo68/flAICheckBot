@@ -124,7 +124,7 @@ public class MainApp {
 
 			// App Icon
 			try {
-				Image icon = new ImageIcon(MainApp.class.getResource("/images/app_icon.png")).getImage();
+				Image icon = new ImageIcon(MainApp.class.getResource("/images/app_icon.jpg")).getImage();
 				frame.setIconImage(icon);
 			} catch (Exception e) {
 				LOGGER.warn("Could not load app icon", e);
