@@ -18,23 +18,37 @@ import org.apache.logging.log4j.Logger;
 public class AiProcessManager {
     private static final Logger logger = LogManager.getLogger(AiProcessManager.class);
     private Process process;
-    private final String pythonPath;
     private final String scriptPath;
     private final File aiDir;
+    private final PythonEnvironmentManager envManager;
+    private String pythonPath;
 
     public AiProcessManager() {
         this.aiDir = findAiDir();
+        this.envManager = new PythonEnvironmentManager(new File("."), new File(aiDir, "requirements.txt"));
 
         // Use environment variables for overrides, otherwise look for root .venv
         String envPython = System.getenv("FL_KI_PYTHON");
         if (envPython != null) {
             this.pythonPath = envPython;
         } else {
-            boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
-            String venvSubDir = isWindows ? "Scripts" : "bin";
-            String pythonExec = isWindows ? "python.exe" : "python";
+            recalculatePythonPath();
+        }
+        this.scriptPath = new File(aiDir, "icr_prototype.py").getAbsolutePath();
 
-            // Priority: 1. Root .venv, 2. AI-local venv
+        logger.info("KI-Engine paths initialized. Home: {}, Python: {}, Script: {}", aiDir.getAbsolutePath(),
+                pythonPath, scriptPath);
+    }
+
+    public void recalculatePythonPath() {
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+        String venvSubDir = isWindows ? "Scripts" : "bin";
+        String pythonExec = isWindows ? "python.exe" : "python";
+
+        // Priority: 1. Portable Python (Windows only), 2. Root .venv, 3. AI-local venv
+        if (isWindows && envManager.isReady()) {
+            this.pythonPath = envManager.getPythonPath();
+        } else {
             File rootVenv = new File(".venv/" + venvSubDir + "/" + pythonExec);
             if (rootVenv.exists()) {
                 this.pythonPath = rootVenv.getAbsolutePath();
@@ -48,10 +62,19 @@ public class AiProcessManager {
                 }
             }
         }
-        this.scriptPath = new File(aiDir, "icr_prototype.py").getAbsolutePath();
+    }
 
-        logger.info("KI-Engine paths initialized. Home: {}, Python: {}, Script: {}", aiDir.getAbsolutePath(),
-                pythonPath, scriptPath);
+    public boolean needsSetup() {
+        if (!System.getProperty("os.name").toLowerCase().contains("win"))
+            return false;
+
+        // If we only have the global python or nothing, we might need setup
+        return pythonPath.equals("python.exe") && !envManager.isReady();
+    }
+
+    public void performSetup(PythonEnvironmentManager.ProgressListener listener) throws Exception {
+        envManager.setup(listener);
+        recalculatePythonPath();
     }
 
     private File findAiDir() {

@@ -58,10 +58,27 @@ pip install -r requirements.txt
 ### 2. Java-Anwendung (Maven)
 ```bash
 # Kompilieren und Abhängigkeiten laden
-mvn clean compile
+mvn clean package
 # Anwendung starten
-mvn exec:java -Dexec.mainClass="de.flaicheckbot.MainApp"
+java -jar target/flAICheckBot.jar
 ```
+
+## Installation unter Windows 11 (Automatisch)
+
+Der flAICheckBot ist darauf ausgelegt, so einfach wie möglich gestartet zu werden. Unter Windows 11 erkennt das Programm beim ersten Start automatisch, ob eine passende Python-Umgebung vorhanden ist.
+
+1.  **Dateien vorbereiten:** Entpacken Sie das Programm in ein Verzeichnis Ihrer Wahl (empfohlen: `%LocalAppData%\flAICheckBot`).
+2.  **Starten:** Starten Sie die Anwendung (z.B. über `flAICheckBot.exe` oder `mvn exec:java`).
+3.  **Automatisches Setup:** Wenn kein Python gefunden wird, lädt der Bot automatisch eine portable Version von Python sowie alle notwendigen KI-Bibliotheken (ca. 1GB) im Hintergrund herunter. Der Fortschritt wird in der Statusleiste angezeigt.
+
+> [!TIP]
+> Sie müssen nichts manuell konfigurieren. Stellen Sie lediglich sicher, dass Sie beim ersten Start eine stabile Internetverbindung haben.
+
+### Manuelle Installation (Optional)
+Falls Sie eine eigene Python-Umgebung nutzen möchten:
+1. Erstellen Sie ein `.venv` im Projekt-Root.
+2. Installieren Sie die Abhängigkeiten: `pip install -r src/ai/requirements.txt`.
+3. Setzen Sie ggf. die Umgebungsvariable `FL_KI_PYTHON` auf den Pfad Ihres Python-Interpreters.
 
 ## Projektstruktur
 - `src/main/java`: Java-Anwendungslogik (Swing UI, DB-Management, AI-Bridge).

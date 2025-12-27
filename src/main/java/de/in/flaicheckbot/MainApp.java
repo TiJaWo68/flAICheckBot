@@ -36,7 +36,8 @@ import de.in.utils.Log4jTools;
 import de.in.utils.Version;
 
 /**
- * Central application class that initializes core services (DB, AI Engine) and sets up the main window and navigation.
+ * Central application class that initializes core services (DB, AI Engine) and
+ * sets up the main window and navigation.
  * 
  * @author TiJaWo68 in cooperation with Gemini 3 Flash using Antigravity
  */
@@ -96,17 +97,33 @@ public class MainApp {
 		// 1. Start AI Engine (Parallel)
 		final AiProcessManager aiManager = new AiProcessManager();
 		CompletableFuture.runAsync(() -> {
-			aiManager.startEngine();
-			boolean ready = aiManager.waitForEngine(30);
-			SwingUtilities.invokeLater(() -> {
-				if (ready) {
-					lblEngineStatus.setText("KI-Engine: Bereit ✅");
-					lblEngineStatus.setForeground(new Color(0, 150, 0));
-				} else {
-					lblEngineStatus.setText("KI-Engine: Fehler beim Start ❌");
-					lblEngineStatus.setForeground(Color.RED);
+			try {
+				if (aiManager.needsSetup()) {
+					LOGGER.info("Starting automatic Python setup...");
+					aiManager.performSetup((msg, pct) -> {
+						SwingUtilities.invokeLater(() -> {
+							lblEngineStatus.setText("KI-Setup: " + msg + " (" + pct + "%)");
+						});
+					});
 				}
-			});
+				aiManager.startEngine();
+				boolean ready = aiManager.waitForEngine(30);
+				SwingUtilities.invokeLater(() -> {
+					if (ready) {
+						lblEngineStatus.setText("KI-Engine: Bereit ✅");
+						lblEngineStatus.setForeground(new Color(0, 150, 0));
+					} else {
+						lblEngineStatus.setText("KI-Engine: Fehler beim Start ❌");
+						lblEngineStatus.setForeground(Color.RED);
+					}
+				});
+			} catch (Exception e) {
+				LOGGER.error("AI Engine initialization failed", e);
+				SwingUtilities.invokeLater(() -> {
+					lblEngineStatus.setText("KI-Engine: Setup-Fehler ❌");
+					lblEngineStatus.setForeground(Color.RED);
+				});
+			}
 		});
 
 		// 2. Start Database (Parallel)
@@ -206,7 +223,8 @@ public class MainApp {
 				setProjectId(pid);
 				LOGGER.info("Login successful. Project ID: {}", pid);
 				SwingUtilities.invokeLater(() -> {
-					javax.swing.JOptionPane.showMessageDialog(parent, "Erfolgreich bei Google angemeldet!\nProjekt: " + pid, "Login",
+					javax.swing.JOptionPane.showMessageDialog(parent,
+							"Erfolgreich bei Google angemeldet!\nProjekt: " + pid, "Login",
 							javax.swing.JOptionPane.INFORMATION_MESSAGE);
 				});
 			} catch (Exception e) {
