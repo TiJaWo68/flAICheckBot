@@ -88,7 +88,7 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
     - name: Download Artifacts
@@ -102,9 +102,9 @@ jobs:
         files: |
           flAICheckBot-windows-x64.zip
           flAICheckBot.exe
-        name: Release ${{ github.ref_name }}
-        tag_name: ${{ github.ref }}
-        draft: false
+        name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Manual Build v{0}', needs.build.outputs.version) }}
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref || format('manual-{0}', github.sha) }}
+        draft: ${{ github.event_name == 'workflow_dispatch' }}
         prerelease: false
         generate_release_notes: true
       env:
