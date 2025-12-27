@@ -53,9 +53,11 @@ jobs:
 
     - name: Get Version
       id: get_version
+      shell: pwsh
       run: |
-        $version = [xml](Get-Content pom.xml)
-        echo "version=$($version.project.version)" >> $env:GITHUB_OUTPUT
+        $xml = [xml](Get-Content pom.xml)
+        $version = $xml.project.version
+        "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
     - name: Build with Maven
       run: mvn clean package -DskipTests -s settings.xml
@@ -102,10 +104,10 @@ jobs:
         files: |
           flAICheckBot-windows-x64.zip
           flAICheckBot.exe
-        name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Manual Build v{0}', needs.build.outputs.version) }}
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref || format('manual-{0}', github.sha) }}
-        draft: ${{ github.event_name == 'workflow_dispatch' }}
-        prerelease: false
+        name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Manual Build v{0} (#{1})', needs.build.outputs.version, github.run_number) }}
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}-manual-{1}', needs.build.outputs.version, github.run_number) }}
+        draft: false
+        prerelease: ${{ github.event_name == 'workflow_dispatch' }}
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
