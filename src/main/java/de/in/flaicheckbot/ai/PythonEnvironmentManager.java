@@ -99,21 +99,29 @@ public class PythonEnvironmentManager {
         if (pthFiles != null && pthFiles.length > 0) {
             File pthFile = pthFiles[0];
 
-            // For embeddable python, we need to add common paths and import site
+            // Reorder: ZIP first, then dot, then import site.
+            // This matches the standard embeddable layout more closely.
             StringBuilder sb = new StringBuilder();
-            sb.append(".\n");
             sb.append("python" + PYTHON_VERSION.substring(0, 4).replace(".", "") + ".zip\n"); // e.g. python312.zip
-            sb.append("Lib\n");
-            sb.append("Lib/site-packages\n");
+            sb.append(".\n");
             sb.append("\n");
             sb.append("# Uncomment to run site.main() automatically\n");
             sb.append("import site\n");
 
             Files.writeString(pthFile.toPath(), sb.toString());
-            logger.info("Created robust patching for {}", pthFile.getName());
+            logger.info("Updated .pth configuration for {}: \n{}", pthFile.getName(), sb.toString());
 
-            // Also ensure Lib/site-packages exists
+            // Ensure Lib/site-packages exists for pip
             new File(installDir, "Lib/site-packages").mkdirs();
+
+            // Sanity check for _socket.pyd (critical for pip/logging)
+            File socketPyd = new File(installDir, "_socket.pyd");
+            if (!socketPyd.exists()) {
+                logger.error("CRITICAL: _socket.pyd missing after extraction! Files in directory: {}",
+                        java.util.Arrays.toString(installDir.list()));
+            } else {
+                logger.info("_socket.pyd found and ready.");
+            }
         }
     }
 
