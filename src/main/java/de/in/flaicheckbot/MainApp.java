@@ -96,7 +96,7 @@ public class MainApp {
 
 		// 1. Start AI Engine (Parallel)
 		final AiProcessManager aiManager = new AiProcessManager();
-		CompletableFuture.runAsync(() -> {
+		CompletableFuture<Void> setupFuture = CompletableFuture.runAsync(() -> {
 			try {
 				if (aiManager.needsSetup()) {
 					LOGGER.info("Starting automatic Python setup...");
@@ -123,6 +123,7 @@ public class MainApp {
 					lblEngineStatus.setText("KI-Engine: Setup-Fehler ❌");
 					lblEngineStatus.setForeground(Color.RED);
 				});
+				throw new RuntimeException(e);
 			}
 		});
 
@@ -183,10 +184,11 @@ public class MainApp {
 
 			frame.setVisible(true);
 
-			// Handle DB completion to setup WorkflowUI
-			dbFuture.thenAcceptAsync(dbManager -> {
+			// Handle DB and AI completion to setup WorkflowUI
+			CompletableFuture.allOf(dbFuture, setupFuture).thenAcceptAsync(v -> {
+				DatabaseManager dbManager = dbFuture.join();
 				SwingUtilities.invokeLater(() -> {
-					LOGGER.info("Database ready, initializing UI components...");
+					LOGGER.info("Core systems ready, initializing UI components...");
 					JTabbedPane tabbedPane = new JTabbedPane();
 					tabbedPane.addTab("Training", new TrainingPanel(dbManager));
 					tabbedPane.addTab("Test-Definition", new TestDefinitionPanel(dbManager));
@@ -204,9 +206,9 @@ public class MainApp {
 					});
 				});
 			}).exceptionally(ex -> {
-				LOGGER.error("Failed to initialize database", ex);
+				LOGGER.error("Failed to initialize core systems", ex);
 				SwingUtilities.invokeLater(() -> {
-					btnStart.setText("Datenbankfehler! ❌");
+					btnStart.setText("Initialisierungsfehler! ❌");
 					btnStart.setForeground(Color.RED);
 				});
 				return null;
