@@ -81,6 +81,11 @@ public class PythonEnvironmentManager {
         runPythonCommand(listener, 60, getPipScript.getAbsolutePath());
         getPipScript.delete();
 
+        // 3.5 Install Base build tools (setuptools/wheel)
+        if (listener != null)
+            listener.onProgress("Installiere Basis-Tools (setuptools, wheel)...", 70);
+        runPythonCommand(listener, 70, "-m", "pip", "install", "setuptools", "wheel");
+
         // 4. Install Requirements
         if (requirementsFile != null && requirementsFile.exists()) {
             if (listener != null)
@@ -99,11 +104,13 @@ public class PythonEnvironmentManager {
         if (pthFiles != null && pthFiles.length > 0) {
             File pthFile = pthFiles[0];
 
-            // Reorder: ZIP first, then dot, then import site.
-            // This matches the standard embeddable layout more closely.
+            // Reorder: ZIP first, then dot, then Libs, then site-packages, then import
+            // site.
             StringBuilder sb = new StringBuilder();
             sb.append("python" + PYTHON_VERSION.substring(0, 4).replace(".", "") + ".zip\n"); // e.g. python312.zip
             sb.append(".\n");
+            sb.append("Lib\n");
+            sb.append("Lib/site-packages\n");
             sb.append("\n");
             sb.append("# Uncomment to run site.main() automatically\n");
             sb.append("import site\n");
