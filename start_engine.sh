@@ -14,6 +14,15 @@ if [ ! -d "$SCRIPT_DIR/.venv" ]; then
     exit 1
 fi
 
-echo "Starting AI Engine using root .venv..."
+echo "Starting AI Engine..."
+
+# Kill existing process on port 8000 if it exists
+EXISTING_PID=$(lsof -t -i :8000)
+if [ ! -z "$EXISTING_PID" ]; then
+    echo "Stopping existing AI Engine (PID: $EXISTING_PID)..."
+    kill -9 $EXISTING_PID
+    sleep 1
+fi
+
 cd "$AI_DIR"
 "$SCRIPT_DIR/.venv/bin/python" "$AI_DIR/icr_prototype.py"
