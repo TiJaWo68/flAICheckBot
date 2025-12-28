@@ -146,17 +146,17 @@ public class AIEngineClient {
     }
 
     public java.util.concurrent.CompletableFuture<String> gradeStudentWorkVertexAI(String task, String expected,
-            String actual, String accessToken, String projectId) {
-        return gradeWithEndpoint("/grade_vertex", task, expected, actual, accessToken, projectId);
+            String actual, String accessToken, String projectId, String apiKey) {
+        return gradeWithEndpoint("/grade_vertex", task, expected, actual, accessToken, projectId, apiKey);
     }
 
     private java.util.concurrent.CompletableFuture<String> gradeWithEndpoint(String endpoint, String task,
             String expected, String actual) {
-        return gradeWithEndpoint(endpoint, task, expected, actual, null, null);
+        return gradeWithEndpoint(endpoint, task, expected, actual, null, null, null);
     }
 
     private java.util.concurrent.CompletableFuture<String> gradeWithEndpoint(String endpoint, String task,
-            String expected, String actual, String accessToken, String projectId) {
+            String expected, String actual, String accessToken, String projectId, String apiKey) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             try {
                 String boundary = "---" + UUID.randomUUID().toString();
@@ -182,9 +182,16 @@ public class AIEngineClient {
                             "Content-Disposition: form-data; name=\"projectId\"\r\n\r\n" +
                             projectId + "\r\n";
                 }
+                String apiKeyPart = "";
+                if (apiKey != null && !apiKey.isEmpty()) {
+                    apiKeyPart = "--" + boundary + "\r\n" +
+                            "Content-Disposition: form-data; name=\"apiKey\"\r\n\r\n" +
+                            apiKey + "\r\n";
+                }
                 String foot = "--" + boundary + "--\r\n";
 
-                String requestBodyStr = taskPart + expectedPart + actualPart + tokenPart + projectPart + foot;
+                String requestBodyStr = taskPart + expectedPart + actualPart + tokenPart + projectPart + apiKeyPart
+                        + foot;
 
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(ENGINE_URL + endpoint))
