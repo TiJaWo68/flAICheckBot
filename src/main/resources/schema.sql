@@ -75,3 +75,9 @@ CREATE TABLE IF NOT EXISTS student_work (
     FOREIGN KEY(assignment_id) REFERENCES assignments(id),
     FOREIGN KEY(student_id) REFERENCES students(id)
 );
+
+-- Application Settings
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
