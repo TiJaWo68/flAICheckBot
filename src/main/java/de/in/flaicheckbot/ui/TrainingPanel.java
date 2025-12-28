@@ -160,10 +160,10 @@ public class TrainingPanel extends JPanel {
 		row1.add(btnRecognizeLocal);
 
 		// Manage Cloud Button enablement via Listener
-		de.in.flaicheckbot.MainApp.addLoginListener(loggedIn -> {
-			btnRecognizeCloud.setEnabled(loggedIn);
-			btnRecognizeCloud.setToolTipText(loggedIn ? "Google Cloud Vision OCR starten"
-					: "Bitte zuerst über das Menü 'Account -> Google Login' anmelden.");
+		de.in.flaicheckbot.MainApp.addAuthListener(status -> {
+			btnRecognizeCloud.setEnabled(status.oauthLoggedIn);
+			btnRecognizeCloud.setToolTipText(status.oauthLoggedIn ? "Google Cloud Vision OCR starten"
+					: "Bitte zuerst über das Menü 'Account -> Google Login' anmelden (erfordert OAuth/client_secret.json).");
 		});
 
 		JPanel row2 = new JPanel(new WrapLayout(FlowLayout.LEFT, 5, 2));
