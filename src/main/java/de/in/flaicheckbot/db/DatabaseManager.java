@@ -682,4 +682,28 @@ public class DatabaseManager {
             pstmt.executeUpdate();
         }
     }
+
+    public String getSetting(String key) throws SQLException {
+        String sql = "SELECT value FROM settings WHERE key = ?";
+        try (Connection conn = getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, key);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("value");
+                }
+            }
+        }
+        return null;
+    }
+
+    public void setSetting(String key, String value) throws SQLException {
+        String sql = "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)";
+        try (Connection conn = getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, key);
+            pstmt.setString(2, value);
+            pstmt.executeUpdate();
+        }
+    }
 }
