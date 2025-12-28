@@ -40,11 +40,11 @@ import org.cuberact.swing.layout.Composite;
 
 import de.in.flaicheckbot.db.DatabaseManager;
 import de.in.flaicheckbot.util.DocumentTextExtractor;
+import de.in.flaicheckbot.util.UndoHelper;
 import de.in.utils.gui.ExceptionMessage;
 
 /**
- * Swing UI panel for creating, editing, and managing test templates
- * and their associated tasks.
+ * Swing UI panel for creating, editing, and managing test templates and their associated tasks.
  * 
  * @author TiJaWo68 in cooperation with Gemini 3 Flash using Antigravity
  */
@@ -126,11 +126,9 @@ public class TestDefinitionPanel extends JPanel {
 
 		JButton btnNewTest = new JButton("Neuen Test erstellen");
 		btnNewTest.addActionListener(e -> {
-			if (!txtTitle.getText().trim().isEmpty() || taskCards.size() > 1
-					|| !taskCards.get(0).getTaskText().trim().isEmpty()) {
+			if (!txtTitle.getText().trim().isEmpty() || taskCards.size() > 1 || !taskCards.get(0).getTaskText().trim().isEmpty()) {
 				int confirm = JOptionPane.showConfirmDialog(this,
-						"Soll der aktuelle Test wirklich verworfen werden, um einen neuen zu erstellen?",
-						"Bestätigung",
+						"Soll der aktuelle Test wirklich verworfen werden, um einen neuen zu erstellen?", "Bestätigung",
 						JOptionPane.YES_NO_OPTION);
 				if (confirm != JOptionPane.YES_OPTION)
 					return;
@@ -180,14 +178,13 @@ public class TestDefinitionPanel extends JPanel {
 		try {
 			List<DatabaseManager.TestInfo> allTests = dbManager.getAllTests();
 			if (allTests.isEmpty()) {
-				JOptionPane.showMessageDialog(this, "Keine gespeicherten Tests in der Datenbank gefunden.",
-						"Information",
+				JOptionPane.showMessageDialog(this, "Keine gespeicherten Tests in der Datenbank gefunden.", "Information",
 						JOptionPane.INFORMATION_MESSAGE);
 				return;
 			}
 
-			TestSelectionDialog dialog = new TestSelectionDialog((Frame) SwingUtilities.getWindowAncestor(this),
-					dbManager, allTests, (deleted) -> {
+			TestSelectionDialog dialog = new TestSelectionDialog((Frame) SwingUtilities.getWindowAncestor(this), dbManager, allTests,
+					deleted -> {
 						if (currentTestId == deleted.id) {
 							resetPanel();
 						}
@@ -200,8 +197,7 @@ public class TestDefinitionPanel extends JPanel {
 				// Confirm before overwriting current work if NOT empty
 				if (!txtTitle.getText().trim().isEmpty() || !taskCards.isEmpty()) {
 					int confirm = JOptionPane.showConfirmDialog(this,
-							"Aktuelle Eingaben werden beim Laden eines neuen Tests verworfen. Fortfahren?",
-							"Bestätigung",
+							"Aktuelle Eingaben werden beim Laden eines neuen Tests verworfen. Fortfahren?", "Bestätigung",
 							JOptionPane.YES_NO_OPTION);
 					if (confirm != JOptionPane.YES_OPTION)
 						return;
@@ -297,43 +293,35 @@ public class TestDefinitionPanel extends JPanel {
 		try {
 			String title = txtTitle.getText().trim();
 			if (title.isEmpty()) {
-				JOptionPane.showMessageDialog(this, "Bitte einen Titel für den Test angeben!", "Fehler",
-						JOptionPane.WARNING_MESSAGE);
+				JOptionPane.showMessageDialog(this, "Bitte einen Titel für den Test angeben!", "Fehler", JOptionPane.WARNING_MESSAGE);
 				return;
 			}
 
 			if (taskCards.isEmpty()) {
-				JOptionPane.showMessageDialog(this, "Ein Test muss mindestens eine Aufgabe haben!", "Fehler",
-						JOptionPane.WARNING_MESSAGE);
+				JOptionPane.showMessageDialog(this, "Ein Test muss mindestens eine Aufgabe haben!", "Fehler", JOptionPane.WARNING_MESSAGE);
 				return;
 			}
 
 			List<DatabaseManager.TaskInfo> tasks = new ArrayList<>();
 			for (int i = 0; i < taskCards.size(); i++) {
 				TaskCard card = taskCards.get(i);
-				tasks.add(new DatabaseManager.TaskInfo(i + 1, card.getTaskText(), card.getReferenceText(),
-						card.getMaxPoints(),
+				tasks.add(new DatabaseManager.TaskInfo(i + 1, card.getTaskText(), card.getReferenceText(), card.getMaxPoints(),
 						card.getResourceInfo(), ""));
 			}
 
 			if (currentTestId != -1) {
-				dbManager.updateTestDefinitionWithTasks(currentTestId, title, txtGrade.getText().trim(),
-						txtLearningUnit.getText().trim(),
+				dbManager.updateTestDefinitionWithTasks(currentTestId, title, txtGrade.getText().trim(), txtLearningUnit.getText().trim(),
 						tasks);
 				logger.info("Successfully updated test definition ID {} with {} tasks", currentTestId, tasks.size());
-				JOptionPane.showMessageDialog(this, "Test erfolgreich aktualisiert!", "Erfolg",
-						JOptionPane.INFORMATION_MESSAGE);
+				JOptionPane.showMessageDialog(this, "Test erfolgreich aktualisiert!", "Erfolg", JOptionPane.INFORMATION_MESSAGE);
 			} else {
-				int testId = dbManager.createTestDefinition(title, txtGrade.getText().trim(),
-						txtLearningUnit.getText().trim());
+				int testId = dbManager.createTestDefinition(title, txtGrade.getText().trim(), txtLearningUnit.getText().trim());
 				for (int i = 0; i < tasks.size(); i++) {
 					DatabaseManager.TaskInfo task = tasks.get(i);
-					dbManager.addTestTask(testId, i + 1, task.taskText, task.referenceText, task.maxPoints,
-							task.resourceInfo);
+					dbManager.addTestTask(testId, i + 1, task.taskText, task.referenceText, task.maxPoints, task.resourceInfo);
 				}
 				logger.info("Successfully created new test definition '{}' with {} tasks", title, tasks.size());
-				JOptionPane.showMessageDialog(this, "Test erfolgreich gespeichert!", "Erfolg",
-						JOptionPane.INFORMATION_MESSAGE);
+				JOptionPane.showMessageDialog(this, "Test erfolgreich gespeichert!", "Erfolg", JOptionPane.INFORMATION_MESSAGE);
 			}
 
 			// Reset
@@ -370,8 +358,7 @@ public class TestDefinitionPanel extends JPanel {
 			JPanel leftPanel = new JPanel();
 			leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
 			leftPanel.setBorder(BorderFactory.createEmptyBorder(10, 5, 10, 5));
-			lblNumber = new JLabel("#" + position, SwingConstants.CENTER); // Still keep it but maybe it's less
-																			// prominent? Or remove?
+			lblNumber = new JLabel("#" + position, SwingConstants.CENTER); // Still keep it but maybe it's less prominent? Or remove?
 			// Actually, let's keep it as a small indicator or remove the large font.
 			lblNumber.setFont(new Font("SansSerif", Font.BOLD, 14));
 			lblNumber.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -408,10 +395,14 @@ public class TestDefinitionPanel extends JPanel {
 			atxtTask = new JTextArea(6, 20);
 			atxtTask.setLineWrap(true);
 			atxtTask.setWrapStyleWord(true);
+			atxtTask.setFont(atxtTask.getFont().deriveFont(atxtTask.getFont().getSize2D() + 2f));
+			UndoHelper.addUndoSupport(atxtTask);
 
 			atxtRef = new JTextArea(12, 20);
 			atxtRef.setLineWrap(true);
 			atxtRef.setWrapStyleWord(true);
+			atxtRef.setFont(atxtRef.getFont().deriveFont(atxtRef.getFont().getSize2D() + 2f));
+			UndoHelper.addUndoSupport(atxtRef);
 
 			// Building the layout row by row Row 0: Task Text Header
 			contentPanel.addCell(createHeaderPanel("Aufgabentext:", atxtTask)).colspan(2).fillX();
