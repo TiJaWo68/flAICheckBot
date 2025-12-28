@@ -23,6 +23,7 @@ from fastapi import Response, Form
 import json
 from google import genai
 from google.genai import types
+from google.oauth2.credentials import Credentials
 
 DB_PATH = "../../flaicheckbot.db"
 ADAPTER_PATH = "./trocr-adapter"
@@ -36,9 +37,9 @@ LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
 
 try:
     # New SDK initialization
-    vertex_client = genai.Client(project=PROJECT_ID, location=LOCATION, vertexai=True)
     vertex_model_name = "gemini-2.0-flash"
-    print(f"Vertex AI (google-genai) initialized (Project: {PROJECT_ID}, Location: {LOCATION})")
+    vertex_client = genai.Client(project=PROJECT_ID, location=LOCATION, vertexai=True)
+    print(f"Vertex AI (google-genai) initialized (Project: {PROJECT_ID}, Location: {LOCATION}, Model: {vertex_model_name})")
 except Exception as e:
     print(f"Warning: Failed to initialize Vertex AI Client: {e}")
     vertex_client = None
@@ -48,7 +49,25 @@ print(f"Using device: {device}")
 
 @app.get("/ping")
 async def ping():
-    return {"status": "success", "message": "AI Engine is alive"}
+    return {"status": "ok", "model": vertex_model_name}
+
+@app.get("/models")
+async def list_available_models(token: str = "", projectId: str = "", apiKey: str = ""):
+    try:
+        if apiKey:
+            client = genai.Client(api_key=apiKey)
+        elif token:
+            client = genai.Client(project=projectId, location=LOCATION, vertexai=True, credentials=Credentials(token=token))
+        else:
+            client = vertex_client
+            
+        if not client:
+            return {"status": "error", "message": "Client not initialized"}
+            
+        models = [m.name for m in client.models.list()]
+        return {"status": "success", "models": models}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 print("Loading TrOCR model...")
 try:
@@ -317,23 +336,30 @@ async def grade(task: str = Form(...), expected: str = Form(""), actual: str = F
 
 @app.post("/grade_vertex")
 async def grade_vertex(task: str = Form(...), expected: str = Form(""), actual: str = Form(...), 
-                       token: str = Form(""), projectId: str = Form("")):
+                       token: str = Form(""), projectId: str = Form(""), apiKey: str = Form("")):
     try:
         current_project = projectId if projectId else PROJECT_ID
+        model_to_use = "gemini-2.0-flash" # Default/Fallback
         
-        if token:
-            # Initialize Client with provided token
+        if apiKey:
+            # AI Studio mode - use gemini-2.0-flash for consistency (1.5-flash was 404)
+            current_client = genai.Client(api_key=apiKey)
+            model_to_use = "gemini-2.0-flash"
+        elif token:
+            # Vertex AI mode - use what worked before
             current_client = genai.Client(
                 project=current_project, 
                 location=LOCATION, 
                 vertexai=True,
-                credentials=types.Credentials(access_token=token)
+                credentials=Credentials(token=token)
             )
+            model_to_use = "gemini-2.0-flash"
         elif projectId and projectId != PROJECT_ID:
-            # Initialize Client with specific project
             current_client = genai.Client(project=projectId, location=LOCATION, vertexai=True)
+            model_to_use = "gemini-2.0-flash"
         else:
             current_client = vertex_client
+            model_to_use = vertex_model_name
 
         if not current_client:
             return {"status": "error", "message": "Vertex AI not initialized. Check Project ID and Authentication."}
@@ -378,7 +404,7 @@ Antworten Sie ausschließlich im JSON-Format, wobei das obige Schema in das 'fee
 """
 
         response = current_client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=model_to_use,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
@@ -397,8 +423,46 @@ Antworten Sie ausschließlich im JSON-Format, wobei das obige Schema in das 'fee
         return result
         
     except Exception as e:
-        print(f"Error in /grade_vertex: {e}")
-        return {"status": "error", "message": str(e)}
+        err_msg = str(e)
+        logger_name = "AI-Engine"
+        print(f"[{logger_name}] Error in /grade_vertex: {err_msg}")
+        
+        # Log more details for debugging (without leaking full tokens)
+        print(f"[{logger_name}] Request Details - Project: {current_project}, Location: {LOCATION}, Model: {model_to_use}")
+        if token:
+            print(f"[{logger_name}] OAuth Token detected (prefix: {token[:10]}...)")
+        if apiKey:
+            print(f"[{logger_name}] API Key detected (prefix: {apiKey[:5]}...)")
+
+        # Robust error extraction
+        clean_msg = "Ein unerwarteter KI-Fehler ist aufgetreten."
+        error_code = "UNKNOWN"
+        
+        if "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
+            error_code = "QUOTA_EXCEEDED"
+            import re
+            retry_match = re.search(r"retryDelay': '(\d+s)'", err_msg)
+            wait_time = retry_match.group(1) if retry_match else "einem Moment"
+            clean_msg = f"Kontingent erschöpft (Limit erreicht). Bitte warten Sie ca. {wait_time} vor dem nächsten Versuch."
+        elif "NOT_FOUND" in err_msg or "404" in err_msg:
+            error_code = "MODEL_NOT_FOUND"
+            # Include the SDK error message because it contains valuable "models/..." or project info
+            clean_msg = f"Modell '{model_to_use}' nicht verfügbar. Details: {err_msg.split(' {')[0]}"
+        elif "PERMISSION_DENIED" in err_msg or "403" in err_msg:
+            error_code = "AUTH_ERROR"
+            clean_msg = "Zugriff verweigert (403). Prüfen Sie Berechtigungen oder Projekt-Aktivierung."
+        elif "INVALID_ARGUMENT" in err_msg or "400" in err_msg:
+            error_code = "INVALID_REQUEST"
+            clean_msg = "Ungültige Anfrage an die KI (400)."
+        else:
+            clean_msg = err_msg.split(". {")[0]
+            
+        return {
+            "status": "error", 
+            "message": clean_msg, 
+            "code": error_code,
+            "technical_details": err_msg
+        }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
