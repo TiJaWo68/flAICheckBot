@@ -49,12 +49,32 @@ public class MainApp {
 	private static final Logger LOGGER = LogManager.getLogger(MainApp.class);
 	private static com.google.auth.Credentials credentials;
 	private static String projectId;
+	private static String geminiApiKey;
+	private static boolean preferApiKey = true; // Default to true for ease of use
 
-	private static final List<Consumer<Boolean>> loginListeners = new ArrayList<>();
+	public static class AuthStatus {
+		public final boolean oauthLoggedIn;
+		public final boolean apiKeyProvided;
 
-	public static void addLoginListener(Consumer<Boolean> listener) {
-		loginListeners.add(listener);
-		listener.accept(credentials != null);
+		public AuthStatus(boolean oauthLoggedIn, boolean apiKeyProvided) {
+			this.oauthLoggedIn = oauthLoggedIn;
+			this.apiKeyProvided = apiKeyProvided;
+		}
+
+		public boolean isAnyAvailable() {
+			return oauthLoggedIn || apiKeyProvided;
+		}
+	}
+
+	private static final List<Consumer<AuthStatus>> authListeners = new ArrayList<>();
+
+	public static void addAuthListener(Consumer<AuthStatus> listener) {
+		authListeners.add(listener);
+		listener.accept(getAuthStatus());
+	}
+
+	private static AuthStatus getAuthStatus() {
+		return new AuthStatus(credentials != null, geminiApiKey != null && !geminiApiKey.isEmpty());
 	}
 
 	public static com.google.auth.Credentials getCredentials() {
@@ -63,8 +83,31 @@ public class MainApp {
 
 	public static void setCredentials(com.google.auth.Credentials creds) {
 		credentials = creds;
-		for (Consumer<Boolean> listener : loginListeners) {
-			listener.accept(credentials != null);
+		notifyAuthListeners();
+	}
+
+	public static String getGeminiApiKey() {
+		return geminiApiKey;
+	}
+
+	public static void setGeminiApiKey(String key) {
+		geminiApiKey = key;
+		notifyAuthListeners();
+	}
+
+	public static boolean isPreferApiKey() {
+		return preferApiKey;
+	}
+
+	public static void setPreferApiKey(boolean prefer) {
+		preferApiKey = prefer;
+		notifyAuthListeners();
+	}
+
+	private static void notifyAuthListeners() {
+		AuthStatus status = getAuthStatus();
+		for (Consumer<AuthStatus> listener : authListeners) {
+			listener.accept(status);
 		}
 	}
 
@@ -82,6 +125,16 @@ public class MainApp {
 		LOGGER.info("flAICheckBot " + Version.retrieveVersionFromPom(GROUPID, ARTIFACTID) + " started");
 
 		FlatDarculaLaf.setup();
+
+		// Parse command line arguments
+		String authArg = null;
+		for (String arg : args) {
+			if (arg.startsWith("--auth=")) {
+				authArg = arg.substring("--auth=".length());
+			}
+		}
+
+		final String finalAuthArg = authArg;
 
 		// UI State Components
 		final JLabel lblEngineStatus = new JLabel("KI-Engine: Startet...", SwingConstants.RIGHT);
@@ -176,9 +229,33 @@ public class MainApp {
 			frame.getRootPane().putClientProperty("flatlaf.menuBarEmbedded", true);
 			javax.swing.JMenuBar menuBar = new javax.swing.JMenuBar();
 			javax.swing.JMenu accountMenu = new javax.swing.JMenu("Account");
-			javax.swing.JMenuItem loginItem = new javax.swing.JMenuItem("Google Login...");
+			javax.swing.JMenuItem loginItem = new javax.swing.JMenuItem("Google Login (OAuth)...");
 			loginItem.addActionListener(e -> performLogin(frame));
 			accountMenu.add(loginItem);
+
+			javax.swing.JMenuItem apiKeyItem = new javax.swing.JMenuItem("Gemini API Key eingeben...");
+			apiKeyItem.addActionListener(e -> performApiKeyEntry(frame, dbFuture.join()));
+			accountMenu.add(apiKeyItem);
+
+			accountMenu.addSeparator();
+
+			javax.swing.JCheckBoxMenuItem preferApiKeyItem = new javax.swing.JCheckBoxMenuItem("API Key bevorzugen");
+			preferApiKeyItem.setSelected(preferApiKey);
+			preferApiKeyItem.addActionListener(e -> {
+				setPreferApiKey(preferApiKeyItem.isSelected());
+				try {
+					dbFuture.join().setSetting("prefer_api_key", String.valueOf(preferApiKeyItem.isSelected()));
+				} catch (Exception ex) {
+					LOGGER.error("Failed to save preference", ex);
+				}
+			});
+			addAuthListener(status -> {
+				SwingUtilities.invokeLater(() -> {
+					preferApiKeyItem.setSelected(preferApiKey);
+				});
+			});
+			accountMenu.add(preferApiKeyItem);
+
 			menuBar.add(accountMenu);
 			frame.setJMenuBar(menuBar);
 
@@ -187,6 +264,34 @@ public class MainApp {
 			// Handle DB and AI completion to setup WorkflowUI
 			CompletableFuture.allOf(dbFuture, setupFuture).thenAcceptAsync(v -> {
 				DatabaseManager dbManager = dbFuture.join();
+
+				// Load Gemini API Key from DB
+				try {
+					String key = dbManager.getSetting("gemini_api_key");
+					if (key != null && !key.isEmpty()) {
+						setGeminiApiKey(key);
+						LOGGER.info("Gemini API Key loaded from database.");
+					}
+
+					String prefer = dbManager.getSetting("prefer_api_key");
+					if (prefer != null) {
+						setPreferApiKey(Boolean.parseBoolean(prefer));
+						LOGGER.info("Auth preference loaded from database: preferApiKey={}", prefer);
+					}
+
+					// Override with command line arguments if provided
+					if ("google".equalsIgnoreCase(finalAuthArg)) {
+						LOGGER.info("Command line override: Using Google Login.");
+						setPreferApiKey(false);
+						// Automatic login will be handled below
+					} else if ("apikey".equalsIgnoreCase(finalAuthArg)) {
+						LOGGER.info("Command line override: Using Gemini API Key.");
+						setPreferApiKey(true);
+					}
+				} catch (Exception e) {
+					LOGGER.warn("Failed to load settings from DB", e);
+				}
+
 				SwingUtilities.invokeLater(() -> {
 					LOGGER.info("Core systems ready, initializing UI components...");
 					JTabbedPane tabbedPane = new JTabbedPane();
@@ -198,6 +303,13 @@ public class MainApp {
 
 					btnStart.setText("Anwendung starten");
 					btnStart.setEnabled(true);
+
+					// Automatic login if requested
+					if ("google".equalsIgnoreCase(finalAuthArg)) {
+						LOGGER.info("Triggering automatic Google Login...");
+						performLogin(frame);
+					}
+
 					btnStart.addActionListener(e -> {
 						CardLayout cl = (CardLayout) mainPanel.getLayout();
 						cl.show(mainPanel, "app");
@@ -224,11 +336,6 @@ public class MainApp {
 				String pid = de.in.flaicheckbot.util.GoogleLoginManager.getProjectId();
 				setProjectId(pid);
 				LOGGER.info("Login successful. Project ID: {}", pid);
-				SwingUtilities.invokeLater(() -> {
-					javax.swing.JOptionPane.showMessageDialog(parent,
-							"Erfolgreich bei Google angemeldet!\nProjekt: " + pid, "Login",
-							javax.swing.JOptionPane.INFORMATION_MESSAGE);
-				});
 			} catch (Exception e) {
 				LOGGER.error("Login failed", e);
 				SwingUtilities.invokeLater(() -> {
@@ -236,6 +343,30 @@ public class MainApp {
 				});
 			}
 		}).start();
+	}
+
+	public static void performApiKeyEntry(java.awt.Window parent, DatabaseManager dbManager) {
+		String current = "";
+		try {
+			current = dbManager.getSetting("gemini_api_key");
+		} catch (Exception e) {
+		}
+
+		String key = javax.swing.JOptionPane.showInputDialog(parent,
+				"Bitte geben Sie Ihren Gemini API Key ein (von aistudio.google.com):",
+				current);
+
+		if (key != null) {
+			try {
+				dbManager.setSetting("gemini_api_key", key.trim());
+				setGeminiApiKey(key.trim());
+				javax.swing.JOptionPane.showMessageDialog(parent, "API Key gespeichert.", "Gemini API",
+						javax.swing.JOptionPane.INFORMATION_MESSAGE);
+			} catch (Exception e) {
+				LOGGER.error("Failed to save API Key", e);
+				de.in.utils.gui.ExceptionMessage.show(parent, "Fehler", "Speichern fehlgeschlagen", e);
+			}
+		}
 	}
 
 	private static class BackgroundPanel extends JPanel {
