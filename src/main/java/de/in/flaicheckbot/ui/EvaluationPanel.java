@@ -170,12 +170,14 @@ public class EvaluationPanel extends JPanel {
         btnBatchGradeCloud.addActionListener(e -> runBatchAction("GRADE_CLOUD"));
 
         // Manage Cloud Buttons enablement via Listener
-        de.in.flaicheckbot.MainApp.addLoginListener(loggedIn -> {
-            btnBatchOcrCloud.setEnabled(loggedIn);
-            btnBatchGradeCloud.setEnabled(loggedIn);
-            String tooltip = loggedIn ? null : "Bitte zuerst über das Menü 'Account -> Google Login' anmelden.";
-            btnBatchOcrCloud.setToolTipText(tooltip);
-            btnBatchGradeCloud.setToolTipText(tooltip);
+        de.in.flaicheckbot.MainApp.addAuthListener(status -> {
+            btnBatchOcrCloud.setEnabled(status.oauthLoggedIn);
+            btnBatchGradeCloud.setEnabled(status.isAnyAvailable());
+
+            btnBatchOcrCloud.setToolTipText(status.oauthLoggedIn ? "Alle Scans via Google Vision OCR erkennen"
+                    : "Bitte zuerst über das Menü 'Account -> Google Login' anmelden (erfordert OAuth).");
+            btnBatchGradeCloud.setToolTipText(status.isAnyAvailable() ? "Alle Korrekturen via Gemini API starten"
+                    : "Bitte zuerst über das Menü 'Account' anmelden oder einen API Key eingeben.");
         });
 
         add(southPanel, BorderLayout.SOUTH);
