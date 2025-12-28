@@ -236,10 +236,10 @@ public class EvaluationStudentPanel extends JPanel {
 		ocrToolbar.add(btnLocal);
 
 		// Manage Cloud Button enablement via Listener
-		de.in.flaicheckbot.MainApp.addLoginListener(loggedIn -> {
-			btnCloud.setEnabled(loggedIn);
-			btnCloud.setToolTipText(loggedIn ? "Google Cloud Vision OCR starten"
-					: "Bitte zuerst über das Menü 'Account -> Google Login' anmelden.");
+		de.in.flaicheckbot.MainApp.addAuthListener(status -> {
+			btnCloud.setEnabled(status.oauthLoggedIn);
+			btnCloud.setToolTipText(status.oauthLoggedIn ? "Google Cloud Vision OCR starten"
+					: "Bitte zuerst über das Menü 'Account -> Google Login' anmelden (erfordert OAuth/client_secret.json).");
 		});
 
 		JButton btnFontPlus = new JButton("T+");
@@ -353,11 +353,10 @@ public class EvaluationStudentPanel extends JPanel {
 		btnVertexGrade.addActionListener(e -> runVertexKiGrading());
 		btnBox.add(btnVertexGrade);
 
-		// Manage Vertex AI Button enablement via Listener
-		de.in.flaicheckbot.MainApp.addLoginListener(loggedIn -> {
-			btnVertexGrade.setEnabled(loggedIn);
-			btnVertexGrade.setToolTipText(loggedIn ? "Cloud-Bewertung via Google Vertex AI"
-					: "Bitte zuerst über das Menü 'Account -> Google Login' anmelden.");
+		de.in.flaicheckbot.MainApp.addAuthListener(status -> {
+			btnVertexGrade.setEnabled(status.isAnyAvailable());
+			btnVertexGrade.setToolTipText(status.isAnyAvailable() ? "Cloud-Bewertung via Google Gemini API"
+					: "Bitte zuerst über das Menü 'Account' anmelden oder einen API Key eingeben.");
 		});
 
 		gradeActions.add(btnBox, BorderLayout.CENTER);
@@ -439,15 +438,37 @@ public class EvaluationStudentPanel extends JPanel {
 				AIEngineClient client = new AIEngineClient();
 				java.util.concurrent.CompletableFuture<String> future;
 				if (useVertex) {
-					String token = "";
-					com.google.auth.Credentials creds = de.in.flaicheckbot.MainApp.getCredentials();
-					if (creds instanceof GoogleCredentials) {
-						GoogleCredentials gcreds = (GoogleCredentials) creds;
-						AccessToken at = gcreds.refreshAccessToken();
-						token = at.getTokenValue();
+					String apiKey = null;
+					String token = null;
+
+					boolean preferApi = de.in.flaicheckbot.MainApp.isPreferApiKey();
+					String savedApiKey = null;
+					try {
+						savedApiKey = dbManager.getSetting("gemini_api_key");
+					} catch (java.sql.SQLException e) {
+						logger.warn("Could not load API Key from settings", e);
 					}
+
+					if (preferApi && savedApiKey != null && !savedApiKey.isEmpty()) {
+						apiKey = savedApiKey;
+						logger.debug("Using API Key for grading (Preference)");
+					} else {
+						com.google.auth.Credentials creds = de.in.flaicheckbot.MainApp.getCredentials();
+						if (creds instanceof GoogleCredentials) {
+							GoogleCredentials gcreds = (GoogleCredentials) creds;
+							AccessToken at = gcreds.refreshAccessToken();
+							token = at.getTokenValue();
+						}
+						// Fallback to API Key if OAuth is missing but requested or preferred?
+						// No, let's keep it strict for testing.
+						if (token == null && savedApiKey != null) {
+							apiKey = savedApiKey;
+							logger.debug("Falling back to API Key for grading");
+						}
+					}
+
 					future = client.gradeStudentWorkVertexAI(testConfig.toString(), "", txtRecognized.getText(), token,
-							de.in.flaicheckbot.MainApp.getProjectId());
+							de.in.flaicheckbot.MainApp.getProjectId(), apiKey);
 				} else {
 					future = client.gradeStudentWork(testConfig.toString(), "", txtRecognized.getText());
 				}
@@ -464,16 +485,33 @@ public class EvaluationStudentPanel extends JPanel {
 						try {
 							ObjectMapper mapper = new ObjectMapper();
 							JsonNode root = mapper.readTree(response);
-							if (root.isObject() && "success".equals(root.path("status").asText())) {
-								feedback = root.path("feedback").asText();
-								score = root.path("score").asInt();
+							if (root.isObject()) {
+								String status = root.path("status").asText();
+								if ("success".equals(status)) {
+									feedback = root.path("feedback").asText();
+									score = root.path("score").asInt();
+									dbManager.updateGrading(work.id, response, score, feedback);
+									displayGradingWithMax(response, totalMaxPoints[0]);
+								} else if ("error".equals(status)) {
+									String msg = root.path("message").asText("Unbekannter Fehler");
+									String tech = root.path("technical_details").asText("");
+									txtFeedback.setText("⚠ KI-FEHLER: " + msg);
+
+									String displayMsg = "Die KI konnte die Arbeit nicht bewerten:\n\n" + msg;
+									if (tech.contains("404") || tech.contains("NOT_FOUND")) {
+										displayMsg += "\n\n💡 Tipp: Prüfen Sie, ob das Modell 'gemini-1.5-flash' in Ihrem Google Cloud Projekt aktiviert wurde.";
+									}
+
+									JOptionPane.showMessageDialog(this, displayMsg, "KI Fehlermeldung",
+											JOptionPane.ERROR_MESSAGE);
+								}
 							}
 						} catch (Exception e) {
 							logger.warn("Could not parse AI response JSON for extraction", e);
+							// Fallback if not JSON or parsing fails
+							dbManager.updateGrading(work.id, response, score, feedback);
+							displayGradingWithMax(response, totalMaxPoints[0]);
 						}
-
-						dbManager.updateGrading(work.id, response, score, feedback);
-						displayGradingWithMax(response, totalMaxPoints[0]);
 					} catch (java.sql.SQLException e) {
 						logger.error("Failed to update grading in DB", e);
 						ExceptionMessage.show(this, "Fehler", "Bewertung konnte nicht gespeichert werden", e);
