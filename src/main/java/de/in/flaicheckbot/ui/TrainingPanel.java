@@ -309,7 +309,16 @@ public class TrainingPanel extends JPanel {
 	}
 
 	private void selectImage() {
-		JFileChooser chooser = new JFileChooser();
+		String lastDir = null;
+		try {
+			lastDir = dbManager.getSetting("last_import_directory");
+		} catch (Exception e) {
+			logger.warn("Failed to load last import directory", e);
+		}
+
+		JFileChooser chooser = (lastDir != null && new File(lastDir).exists()) ? new JFileChooser(lastDir)
+				: new JFileChooser();
+
 		chooser.setFileFilter(
 				new javax.swing.filechooser.FileNameExtensionFilter("Images & Documents", "png", "jpg", "jpeg", "pdf"));
 		if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
@@ -320,6 +329,14 @@ public class TrainingPanel extends JPanel {
 	private void loadImage(File file) {
 		selectedImageFile = file;
 		lblImageStatus.setText(selectedImageFile.getName());
+
+		// Save last directory so next JFileChooser opens here
+		try {
+			dbManager.setSetting("last_import_directory", file.getParent());
+		} catch (Exception e) {
+			logger.warn("Failed to save last import directory: {}", e.getMessage());
+		}
+
 		try {
 			BufferedImage img;
 			if (selectedImageFile.getName().toLowerCase().endsWith(".pdf")) {
