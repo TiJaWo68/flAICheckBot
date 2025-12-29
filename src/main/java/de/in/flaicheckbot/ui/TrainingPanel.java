@@ -239,6 +239,7 @@ public class TrainingPanel extends JPanel {
 	}
 
 	private void runAiTraining() {
+		logger.info("User triggered AI Fine-Tuning.");
 		int confirm = JOptionPane.showConfirmDialog(this,
 				"Möchten Sie das Fine-Tuning der KI mit allen archivierten Daten starten?\nDies kann je nach Datenmenge einige Minuten dauern.",
 				"KI Training", JOptionPane.YES_NO_OPTION);
@@ -276,6 +277,7 @@ public class TrainingPanel extends JPanel {
 	}
 
 	private void resetAiTraining() {
+		logger.info("User triggered AI Training Reset.");
 		int confirm = JOptionPane.showConfirmDialog(this,
 				"Möchten Sie den gelernten Zustand der lokalen KI wirklich zurücksetzen?\n"
 						+ "Das System kehrt zum Basis-Modell zurück. Archivierte Trainingsdaten bleiben erhalten, müssen aber neu trainiert werden.",
@@ -328,6 +330,7 @@ public class TrainingPanel extends JPanel {
 
 	private void loadImage(File file) {
 		selectedImageFile = file;
+		logger.info("Loading image/PDF: {}", file.getAbsolutePath());
 		lblImageStatus.setText(selectedImageFile.getName());
 
 		// Save last directory so next JFileChooser opens here
@@ -380,8 +383,7 @@ public class TrainingPanel extends JPanel {
 			try {
 				// Save current processed image to temp file
 				tempFile = File.createTempFile("flaicheck_local_ocr_", ".png");
-				ImageIO.write(imgToProcess, "png", tempFile);
-
+				logger.info("Starting local OCR recognition for temp file: {}", tempFile.getName());
 				de.in.flaicheckbot.AIEngineClient client = new de.in.flaicheckbot.AIEngineClient();
 				String response = client.recognizeHandwriting(tempFile).get();
 
@@ -391,9 +393,11 @@ public class TrainingPanel extends JPanel {
 
 				if ("success".equals(status)) {
 					String text = root.path("text").asText();
+					logger.info("Local OCR recognition successful.");
 					SwingUtilities.invokeLater(() -> txtResult.setText(text));
 				} else {
 					String msg = root.path("message").asText(response);
+					logger.warn("Local OCR recognition failed: {}", msg);
 					SwingUtilities.invokeLater(
 							() -> JOptionPane.showMessageDialog(this, "Lokale KI Fehler: " + msg, "Fehler",
 									JOptionPane.ERROR_MESSAGE));
@@ -423,10 +427,12 @@ public class TrainingPanel extends JPanel {
 				tempFile = File.createTempFile("flaicheck_preprocess_", ".png");
 				ImageIO.write(imgToProcess, "png", tempFile);
 
+				logger.info("Starting image preprocessing (deskew/AI)...");
 				de.in.flaicheckbot.AIEngineClient client = new de.in.flaicheckbot.AIEngineClient();
 				byte[] imageBytes = client.preprocessImage(tempFile).get();
 
 				if (imageBytes != null && imageBytes.length > 0) {
+					logger.info("Image preprocessing completed successfully.");
 					BufferedImage resultImg = ImageIO.read(new java.io.ByteArrayInputStream(imageBytes));
 					if (resultImg != null) {
 						SwingUtilities.invokeLater(() -> imagePanel.updateImage(resultImg));
@@ -461,6 +467,7 @@ public class TrainingPanel extends JPanel {
 
 		new Thread(() -> {
 			try {
+				logger.info("Starting Google Cloud Vision recognition...");
 				ImageAnnotatorSettings settings = ImageAnnotatorSettings.newBuilder()
 						.setCredentialsProvider(FixedCredentialsProvider.create(credentials)).build();
 
@@ -490,6 +497,7 @@ public class TrainingPanel extends JPanel {
 						}
 					}
 
+					logger.info("Google Cloud recognition completed successfully.");
 					SwingUtilities.invokeLater(() -> txtResult.setText(sb.toString()));
 				}
 			} catch (Exception e) {
@@ -503,6 +511,7 @@ public class TrainingPanel extends JPanel {
 		if (selectedImageFile == null || txtResult.getText().trim().isEmpty()) {
 			return;
 		}
+		logger.info("Saving training set: '{}'...", selectedImageFile.getName());
 		try {
 			int setId = dbManager.createTrainingSet(selectedImageFile.getName(), txtResult.getText());
 			// Save the ACTUALLY used image (maybe cropped)
@@ -514,6 +523,7 @@ public class TrainingPanel extends JPanel {
 
 			dbManager.addTrainingSample(setId, imgData, mime, txtResult.getText());
 
+			logger.info("Training set saved successfully. Set ID: {}", setId);
 			JOptionPane.showMessageDialog(this, "Gespeichert unter Set ID " + setId);
 		} catch (Exception e) {
 			logger.error("Save failed", e);
