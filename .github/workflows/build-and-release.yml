@@ -80,7 +80,7 @@ jobs:
         Compress-Archive -Path release\* -DestinationPath flAICheckBot-windows-x64.zip -Force
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: build-artifacts
         path: |
