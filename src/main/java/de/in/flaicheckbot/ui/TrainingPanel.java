@@ -388,32 +388,40 @@ public class TrainingPanel extends JPanel {
 			return;
 		}
 
+		// Clear result and reset highlight
+		txtResult.setText("");
+		imagePanel.setHighlight(null);
+
 		new Thread(() -> {
 			try {
 				String language = (String) comboLanguage.getSelectedItem();
 				String langCode = mapLanguageCode(language);
 				logger.info("Starting local OCR recognition (Language: {})...", language);
 				de.in.flaicheckbot.AIEngineClient client = new de.in.flaicheckbot.AIEngineClient();
-				String response = client.recognizeHandwriting(imgToProcess, langCode).get();
+
+				String response = client.recognizeHandwritingStreaming(imgToProcess, langCode, true,
+						(index, total, text, bbox) -> {
+							SwingUtilities.invokeLater(() -> {
+								txtResult.append(text + "\n");
+								imagePanel.setHighlight(bbox);
+							});
+						}).get();
 
 				ObjectMapper mapper = new ObjectMapper();
 				JsonNode root = mapper.readTree(response);
-				String status = root.path("status").asText("error");
+				String finalResultText = root.path("text").asText("");
 
-				if ("success".equals(status)) {
-					String text = root.path("text").asText();
-					logger.info("Local OCR recognition successful.");
-					SwingUtilities.invokeLater(() -> txtResult.setText(text));
-				} else {
-					String msg = root.path("message").asText(response);
-					logger.warn("Local OCR recognition failed: {}", msg);
-					SwingUtilities.invokeLater(
-							() -> JOptionPane.showMessageDialog(this, "Lokale KI Fehler: " + msg, "Fehler",
-									JOptionPane.ERROR_MESSAGE));
-				}
+				logger.info("Local OCR recognition completed.");
+				SwingUtilities.invokeLater(() -> {
+					txtResult.setText(finalResultText); // Final result (ensure consistency)
+					imagePanel.setHighlight(null); // Clear last highlight
+				});
 			} catch (Exception e) {
 				logger.error("Local AI Recognition failed", e);
-				SwingUtilities.invokeLater(() -> ExceptionMessage.show(this, "Fehler", "Lokale KI Fehler", e));
+				SwingUtilities.invokeLater(() -> {
+					imagePanel.setHighlight(null);
+					ExceptionMessage.show(this, "Fehler", "Lokale KI Fehler", e);
+				});
 			}
 		}).start();
 	}
