@@ -30,30 +30,41 @@ public class AIPrePostTrainingEvaluator {
     private static final Logger logger = LogManager.getLogger(AIPrePostTrainingEvaluator.class);
     private final AIEngineClient client;
     private final File samplesDir;
+    private final String language;
 
-    public AIPrePostTrainingEvaluator(File samplesDir) {
+    public AIPrePostTrainingEvaluator(File samplesDir, String language) {
         this.client = new AIEngineClient();
         this.samplesDir = samplesDir;
+        this.language = language;
     }
 
     public static void main(String[] args) {
-        // Default execution path
-        File defaultSamples = new File("exported_samples/de");
-        if (!defaultSamples.exists()) {
-            System.err.println("Samples directory not found: " + defaultSamples.getAbsolutePath());
+        File baseDir = new File("exported_samples");
+        if (!baseDir.exists()) {
+            System.err.println("Base samples directory not found: " + baseDir.getAbsolutePath());
             return;
         }
 
-        AIPrePostTrainingEvaluator evaluator = new AIPrePostTrainingEvaluator(defaultSamples);
-        try {
-            evaluator.runEvaluation();
-        } catch (Exception e) {
-            e.printStackTrace();
+        File[] langDirs = baseDir.listFiles(File::isDirectory);
+        if (langDirs == null || langDirs.length == 0) {
+            System.err.println("No language subdirectories found in " + baseDir.getAbsolutePath());
+            return;
+        }
+
+        for (File dir : langDirs) {
+            String lang = dir.getName();
+            logger.info("Starting Evaluation for language: " + lang);
+            AIPrePostTrainingEvaluator evaluator = new AIPrePostTrainingEvaluator(dir, lang);
+            try {
+                evaluator.runEvaluation();
+            } catch (Exception e) {
+                logger.error("Evaluation failed for " + lang, e);
+            }
         }
     }
 
     public void runEvaluation() throws Exception {
-        logger.info("Starting AI Evaluation...");
+        logger.info("Starting AI Evaluation for " + language + " in " + samplesDir.getAbsolutePath());
 
         // 1. Load Samples
         Map<File, String> samples = loadSamples();
@@ -64,21 +75,21 @@ public class AIPrePostTrainingEvaluator {
         logger.info("Loaded " + samples.size() + " samples.");
 
         String timestamp = new SimpleDateFormat("yyyyMMdd_HHmm").format(new Date());
-        String modelId = "de-eval-" + timestamp;
+        String modelId = language + "-eval-" + timestamp;
 
         // 2. Baseline Test (Untrained, Preprocessed)
         logger.info("Running Baseline Test (Untrained, Preprocessed)...");
-        Map<File, String> baselineResults = runRecognitionTest(samples, "de", true);
+        Map<File, String> baselineResults = runRecognitionTest(samples, language, true);
 
         // 3. Raw Test (Untrained, NO Preprocessing)
         logger.info("Running Raw Test (Untrained, NO Preprocessing)...");
-        Map<File, String> rawResults = runRecognitionTest(samples, "de", false);
+        Map<File, String> rawResults = runRecognitionTest(samples, language, false);
 
         // 4. Train Model
         logger.info("Training Model '" + modelId + "'...");
         File trainingTempDir = prepareTrainingData(samples);
         try {
-            String trainResponse = client.trainModel(modelId, trainingTempDir.getAbsolutePath()).get();
+            String trainResponse = client.trainModel(language, trainingTempDir.getAbsolutePath()).get();
             logger.info("Training finished: " + trainResponse);
         } finally {
             // cleanup temp dir? maybe keep for debug
@@ -86,11 +97,11 @@ public class AIPrePostTrainingEvaluator {
 
         // 5. Post-Training Test (Trained, Preprocessed)
         logger.info("Running Post-Training Test...");
-        Map<File, String> trainedResults = runRecognitionTest(samples, modelId, true);
+        Map<File, String> trainedResults = runRecognitionTest(samples, language, true);
 
         // 6. Generate Report
         generateHtmlReport(samples, baselineResults, rawResults, trainedResults, modelId, timestamp);
-        logger.info("Evaluation Complete.");
+        logger.info("Evaluation Complete for " + language);
     }
 
     private Map<File, String> loadSamples() throws IOException {
