@@ -185,6 +185,33 @@ public class DatabaseManager {
         }
     }
 
+    public void deleteTrainingSet(int setId) throws SQLException {
+        try (Connection conn = getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                // Delete samples first
+                String sqlSamples = "DELETE FROM training_samples WHERE training_set_id = ?";
+                try (PreparedStatement pstmt = conn.prepareStatement(sqlSamples)) {
+                    pstmt.setInt(1, setId);
+                    pstmt.executeUpdate();
+                }
+                // Delete set definition
+                String sqlSet = "DELETE FROM training_sets WHERE id = ?";
+                try (PreparedStatement pstmt = conn.prepareStatement(sqlSet)) {
+                    pstmt.setInt(1, setId);
+                    pstmt.executeUpdate();
+                }
+                conn.commit();
+                logger.info("Deleted training set ID {}", setId);
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        }
+    }
+
     public int createAssignment(int classId, int testId, String title) throws SQLException {
         String sql = "INSERT INTO assignments (class_id, test_id, title) VALUES (?, ?, ?)";
         try (Connection conn = getConnection();
