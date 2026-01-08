@@ -63,6 +63,7 @@ public class DatabaseManager {
             addColumnIfMissing(conn, "student_work", "feedback", "TEXT");
             addColumnIfMissing(conn, "student_work", "status", "TEXT DEFAULT 'NEW'");
             addColumnIfMissing(conn, "student_work", "is_evaluated", "BOOLEAN DEFAULT FALSE");
+            addColumnIfMissing(conn, "training_sets", "language", "TEXT DEFAULT 'de'");
 
             // Schema migration for assignments
             addColumnIfMissing(conn, "assignments", "test_id", "INTEGER");
@@ -134,18 +135,33 @@ public class DatabaseManager {
         }
     }
 
+    public void resetDatabase() throws SQLException {
+        logger.warn("Self-healing: Nuking all database records as requested!");
+        String[] tables = { "training_samples", "training_sets", "student_work", "assignments", "test_tasks",
+                "test_definitions", "settings" };
+        try (Connection conn = getConnection();
+                Statement stmt = conn.createStatement()) {
+            for (String table : tables) {
+                stmt.executeUpdate("DELETE FROM " + table);
+                // Also reset sqlite_sequence for autoincrement IDs
+                stmt.executeUpdate("DELETE FROM sqlite_sequence WHERE name='" + table + "'");
+            }
+        }
+    }
+
     public Connection getConnection() throws SQLException {
         return dataSource.getConnection();
     }
 
     // --- Helper Methods using simple JDBC for now ---
 
-    public int createTrainingSet(String title, String originalText) throws SQLException {
-        String sql = "INSERT INTO training_sets (title, original_text) VALUES (?, ?)";
+    public int createTrainingSet(String title, String originalText, String language) throws SQLException {
+        String sql = "INSERT INTO training_sets (title, original_text, language) VALUES (?, ?, ?)";
         try (Connection conn = getConnection();
                 PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             pstmt.setString(1, title);
             pstmt.setString(2, originalText);
+            pstmt.setString(3, language != null ? language : "de");
             pstmt.executeUpdate();
             try (ResultSet generatedKeys = pstmt.getGeneratedKeys()) {
                 if (generatedKeys.next()) {
@@ -704,6 +720,17 @@ public class DatabaseManager {
             pstmt.setString(1, key);
             pstmt.setString(2, value);
             pstmt.executeUpdate();
+        }
+    }
+
+    public static void main(String[] args) {
+        String path = args.length > 0 ? args[0] : "flaicheckbot.db";
+        try {
+            new DatabaseManager(path);
+            System.out.println("Database initialization and self-healing complete.");
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.exit(1);
         }
     }
 }
