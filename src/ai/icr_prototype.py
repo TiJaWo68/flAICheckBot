@@ -20,7 +20,9 @@ import os
 import cv2
 import numpy as np
 from fastapi import Response, Form
+from fastapi.responses import StreamingResponse
 import json
+import asyncio
 from google import genai
 from google.genai import types
 from google.oauth2.credentials import Credentials
@@ -284,12 +286,14 @@ def split_lines_by_projection(roi_thresh: np.ndarray, roi_color: np.ndarray) -> 
                 sub_thresh = roi_thresh[y_low:y_high, :]
                 sub_density = cv2.countNonZero(sub_thresh) / (width * (y_high - y_low))
                 if sub_density > 0.015: # 1.5% ink minimum for a valid line
-                    lines.append(Image.fromarray(cv2.cvtColor(line_roi, cv2.COLOR_BGR2RGB)))
+                    img_line = Image.fromarray(cv2.cvtColor(line_roi, cv2.COLOR_BGR2RGB))
+                    lines.append((img_line, [0, y_low, width, y_high - y_low]))
     
     # Handle trailing segment
     if in_line and height - start_y > 8:
         line_roi = roi_color[start_y:, :]
-        lines.append(Image.fromarray(cv2.cvtColor(line_roi, cv2.COLOR_BGR2RGB)))
+        img_line = Image.fromarray(cv2.cvtColor(line_roi, cv2.COLOR_BGR2RGB))
+        lines.append((img_line, [0, start_y, width, height - start_y]))
         
     return lines
 
@@ -357,7 +361,8 @@ def segment_lines(img: np.ndarray) -> list[Image.Image]:
                 roi_color = img[y_low:y_high, :]
                 clean_roi = remove_ruling_lines(roi_color)
                 masked_roi = apply_schwarzmaske(clean_roi, padding_bottom=padding)
-                line_images.append(Image.fromarray(cv2.cvtColor(masked_roi, cv2.COLOR_BGR2RGB)))
+                img_line = Image.fromarray(cv2.cvtColor(masked_roi, cv2.COLOR_BGR2RGB))
+                line_images.append((img_line, [0, y_low, w_img, y_high - y_low]))
     else:
         # FALLBACK: Use projection logic if no ruled lines found (e.g. plain paper)
         print("No ruled lines found. Falling back to projection segmentation.")
@@ -367,12 +372,16 @@ def segment_lines(img: np.ndarray) -> list[Image.Image]:
         contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[1])
         
         for cnt in contours:
-            x, y, w_c, h_c = cv2.boundingRect(cnt)
+            x_c, y_c, w_c, h_c = cv2.boundingRect(cnt)
             if w_c < 25 or h_c < 5: continue
-            roi_thresh = thresh_clean[y:y+h_c, x:x+w_c]
-            roi_color = img[y:y+h_c, x:x+w_c]
+            roi_thresh = thresh_clean[y_c:y_c+h_c, x_c:x_c+w_c]
+            roi_color = img[y_c:y_c+h_c, x_c:x_c+w_c]
             split = split_lines_by_projection(roi_thresh, roi_color)
-            line_images.extend(split)
+            # Adjust split coordinates to original image
+            for s_img, s_bbox in split:
+                s_bbox[0] += x_c
+                s_bbox[1] += y_c
+                line_images.append((s_img, s_bbox))
             
     print(f"Line-Guided Segmentation: result has {len(line_images)} lines.")
     return line_images
@@ -496,92 +505,94 @@ async def recognize(file: UploadFile = File(...), language: str = Form("de"), pr
         
         # 1. Line Segmentation (Internal logic handles deskewing and cleaning)
         if use_preprocess:
-            line_images = segment_lines(img)
-            print(f"Detected {len(line_images)} lines.")
+            line_results = segment_lines(img)
+            print(f"Detected {len(line_results)} lines.")
         else:
             # Skip segmentation: treat entire image as one "line"
-            line_images = [Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))]
+            line_results = [(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), [0, 0, img.shape[1], img.shape[0]])]
             print("Preprocessing disabled: processing whole image.")
 
-        if not line_images:
+        if not line_results:
             # Fallback for single line/small area
-            line_images = [Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))]
-
-        if not line_images:
-            # Fallback for single line/small area
-            line_images = [Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))]
+            line_results = [(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), [0, 0, img.shape[1], img.shape[0]])]
 
         current_model, active_processor = get_model_and_processor(language)
         current_model.eval()
         
-        results = []
-        for line_img in line_images:
-            # Convert to numpy
-            img_np = cv2.cvtColor(np.array(line_img), cv2.COLOR_RGB2BGR)
-            
-            # Preprocessing: Deskew only. 
-            # Denoising/Binarization (Otsu) REMOVED as it degrades model performance.
-            processed_img_np = deskew(img_np)
-            
-            processed_image = Image.fromarray(cv2.cvtColor(processed_img_np, cv2.COLOR_BGR2RGB))
-            
-            # Padding REMOVED: TrOCR processor internal resizing works better for this model.
-            
-            # 3. Process
-            pixel_values = active_processor(images=processed_image, return_tensors="pt").pixel_values.to(device)
-            
-            with torch.no_grad():
-                # Enable confidence scoring
-                outputs = current_model.generate(
-                    pixel_values=pixel_values,
-                    output_scores=True,
-                    return_dict_in_generate=True,
-                    num_beams=4,
-                    length_penalty=2.0,
-                    early_stopping=True,
-                    repetition_penalty=1.2
-                )
-            
-            generated_ids = outputs.sequences
-            line_text = active_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-            
-            # Confidence filtering
-            avg_prob = 1.0 # Default high confidence if calculation fails
-            try:
-                # For VisionEncoderDecoder, transition_scores gives the log probs of the generated tokens
-                # Crucial validation fix: pass beam_indices if available (needed for beam search)
-                beam_indices = outputs.beam_indices if hasattr(outputs, "beam_indices") else None
+        async def event_generator():
+            results = []
+            total = len(line_results)
+            for i, (line_img, bbox) in enumerate(line_results):
+                # Convert to numpy
+                img_np = cv2.cvtColor(np.array(line_img), cv2.COLOR_RGB2BGR)
                 
-                transition_scores = current_model.compute_transition_scores(
-                    outputs.sequences, 
-                    outputs.scores, 
-                    beam_indices=beam_indices,
-                    normalize_logits=True
-                )
-                # Average probability
-                avg_prob = torch.exp(transition_scores).mean().item()
-            except Exception as e:
-                print(f"Warning: Confidence score computation failed for line '{line_text[:20]}...': {e}")
-                avg_prob = 1.0 # Fallback to keep the result
-            
-            # Pattern rejection
-            if line_text:
-                if is_garbage(line_text):
-                    print(f"Filtering garbage pattern: '{line_text}'")
-                    continue
+                # Preprocessing: Deskew only. 
+                processed_img_np = deskew(img_np)
+                processed_image = Image.fromarray(cv2.cvtColor(processed_img_np, cv2.COLOR_BGR2RGB))
                 
-                # Dynamic threshold: be more lenient for suspected real text, 
-                # but strict for very short fragments
-                threshold = 0.35 if len(line_text) > 15 else 0.5
+                # 3. Process
+                pixel_values = active_processor(images=processed_image, return_tensors="pt").pixel_values.to(device)
                 
-                if avg_prob < threshold:
-                    print(f"Skipping low confidence line ({avg_prob:.2f}): '{line_text}'")
-                    continue
+                with torch.no_grad():
+                    outputs = current_model.generate(
+                        pixel_values=pixel_values,
+                        output_scores=True,
+                        return_dict_in_generate=True,
+                        num_beams=4,
+                        length_penalty=2.0,
+                        early_stopping=True,
+                        repetition_penalty=1.2
+                    )
+                
+                generated_ids = outputs.sequences
+                line_text = active_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                
+                # Confidence filtering
+                avg_prob = 1.0 
+                try:
+                    beam_indices = outputs.beam_indices if hasattr(outputs, "beam_indices") else None
+                    transition_scores = current_model.compute_transition_scores(
+                        outputs.sequences, 
+                        outputs.scores, 
+                        beam_indices=beam_indices,
+                        normalize_logits=True
+                    )
+                    avg_prob = torch.exp(transition_scores).mean().item()
+                except Exception as e:
+                    avg_prob = 1.0 
+                
+                # Pattern rejection
+                if line_text:
+                    if is_garbage(line_text):
+                        print(f"Filtering garbage pattern: '{line_text}'")
+                        continue
                     
-                results.append(line_text)
-        
-        generated_text = "\n".join(results)
-        return {"status": "success", "text": generated_text, "lines_detected": len(line_images)}
+                    threshold = 0.35 if len(line_text) > 15 else 0.5
+                    if avg_prob < threshold:
+                        print(f"Skipping low confidence line ({avg_prob:.2f}): '{line_text}'")
+                        continue
+                        
+                    results.append(line_text)
+                    
+                    # Yield progress update
+                    yield json.dumps({
+                        "type": "line",
+                        "index": i,
+                        "total": total,
+                        "text": line_text,
+                        "bbox": bbox
+                    }) + "\n"
+            
+            # Yield final result
+            final_text = "\n".join(results)
+            yield json.dumps({
+                "type": "final",
+                "status": "success",
+                "text": final_text,
+                "lines_detected": total
+            }) + "\n"
+
+        return StreamingResponse(event_generator(), media_type="application/x-ndjson")
     except Exception as e:
         import traceback
         print(f"Error in /recognize: {traceback.format_exc()}")
