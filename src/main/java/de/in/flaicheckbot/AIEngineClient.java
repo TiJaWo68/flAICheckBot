@@ -1,5 +1,6 @@
 package de.in.flaicheckbot;
 
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -8,6 +9,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.util.UUID;
+
+import javax.imageio.ImageIO;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -27,27 +30,74 @@ public class AIEngineClient {
         this.client = HttpClient.newHttpClient();
     }
 
-    public java.util.concurrent.CompletableFuture<String> recognizeHandwriting(File imageFile) {
+    /**
+     * Consolidates OCR recognition by handling BufferedImage -> Temp File
+     * conversion
+     * and automatic cleanup.
+     * 
+     * @param image    The image to recognize.
+     * @param language The language code (de, en, fr, es).
+     * @return CompletableFuture with the raw JSON response.
+     */
+    public java.util.concurrent.CompletableFuture<String> recognizeHandwriting(BufferedImage image, String language) {
+        return recognizeHandwriting(image, language, true);
+    }
+
+    public java.util.concurrent.CompletableFuture<String> recognizeHandwriting(BufferedImage image, String language,
+            boolean usePreprocessing) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            File tempFile = null;
+            try {
+                tempFile = File.createTempFile("ocr_temp_", ".png");
+                ImageIO.write(image, "png", tempFile);
+                return recognizeHandwriting(tempFile, language, usePreprocessing).get();
+            } catch (Exception e) {
+                logger.error("Failed to perform consolidated OCR", e);
+                throw new RuntimeException(e);
+            } finally {
+                if (tempFile != null && tempFile.exists()) {
+                    tempFile.delete();
+                }
+            }
+        });
+    }
+
+    public java.util.concurrent.CompletableFuture<String> recognizeHandwriting(File imageFile, String language) {
+        return recognizeHandwriting(imageFile, language, true);
+    }
+
+    public java.util.concurrent.CompletableFuture<String> recognizeHandwriting(File imageFile, String language,
+            boolean usePreprocessing) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             try {
                 String boundary = "---" + UUID.randomUUID().toString();
                 byte[] fileBytes = Files.readAllBytes(imageFile.toPath());
 
-                String head = "--" + boundary + "\r\n" +
-                        "Content-Disposition: form-data; name=\"file\"; filename=\"" + imageFile.getName() + "\"\r\n" +
-                        "Content-Type: image/png\r\n\r\n";
-                String foot = "\r\n--" + boundary + "--\r\n";
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                java.nio.charset.Charset utf8 = java.nio.charset.StandardCharsets.UTF_8;
 
-                byte[] requestBody = new byte[head.length() + fileBytes.length + foot.length()];
-                System.arraycopy(head.getBytes(), 0, requestBody, 0, head.length());
-                System.arraycopy(fileBytes, 0, requestBody, head.length(), fileBytes.length);
-                System.arraycopy(foot.getBytes(), 0, requestBody, head.length() + fileBytes.length, foot.length());
+                // Language part
+                baos.write(("--" + boundary + "\r\n").getBytes(utf8));
+                baos.write("Content-Disposition: form-data; name=\"language\"\r\n\r\n".getBytes(utf8));
+                baos.write(((language != null ? language : "de") + "\r\n").getBytes(utf8));
 
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(ENGINE_URL + "/recognize"))
+                // Preprocess part
+                baos.write(("--" + boundary + "\r\n").getBytes(utf8));
+                baos.write("Content-Disposition: form-data; name=\"preprocess\"\r\n\r\n".getBytes(utf8));
+                baos.write((String.valueOf(usePreprocessing) + "\r\n").getBytes(utf8));
+
+                // File part
+                baos.write(("--" + boundary + "\r\n").getBytes(utf8));
+                baos.write(
+                        ("Content-Disposition: form-data; name=\"file\"; filename=\"" + imageFile.getName() + "\"\r\n")
+                                .getBytes(utf8));
+                baos.write("Content-Type: image/png\r\n\r\n".getBytes(utf8));
+                baos.write(fileBytes);
+                baos.write(("\r\n--" + boundary + "--\r\n").getBytes(utf8));
+
+                HttpRequest request = HttpRequest.newBuilder().uri(URI.create(ENGINE_URL + "/recognize"))
                         .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                        .POST(HttpRequest.BodyPublishers.ofByteArray(requestBody))
-                        .build();
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(baos.toByteArray())).build();
 
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 logger.debug("AI Engine response: {}", response.statusCode());
@@ -65,30 +115,26 @@ public class AIEngineClient {
                 String boundary = "---" + UUID.randomUUID().toString();
                 byte[] fileBytes = Files.readAllBytes(audioFile.toPath());
 
-                String langPart = "--" + boundary + "\r\n" +
-                        "Content-Disposition: form-data; name=\"language\"\r\n\r\n" +
-                        (language != null ? language : "de") + "\r\n";
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                java.nio.charset.Charset utf8 = java.nio.charset.StandardCharsets.UTF_8;
 
-                String filePart = "--" + boundary + "\r\n" +
-                        "Content-Disposition: form-data; name=\"file\"; filename=\"" + audioFile.getName() + "\"\r\n" +
-                        "Content-Type: audio/wav\r\n\r\n";
-                String foot = "\r\n--" + boundary + "--\r\n";
+                // Language part
+                baos.write(("--" + boundary + "\r\n").getBytes(utf8));
+                baos.write("Content-Disposition: form-data; name=\"language\"\r\n\r\n".getBytes(utf8));
+                baos.write(((language != null ? language : "de") + "\r\n").getBytes(utf8));
 
-                byte[] requestBody = new byte[langPart.length() + filePart.length() + fileBytes.length + foot.length()];
-                int pos = 0;
-                System.arraycopy(langPart.getBytes(), 0, requestBody, pos, langPart.length());
-                pos += langPart.length();
-                System.arraycopy(filePart.getBytes(), 0, requestBody, pos, filePart.length());
-                pos += filePart.length();
-                System.arraycopy(fileBytes, 0, requestBody, pos, fileBytes.length);
-                pos += fileBytes.length;
-                System.arraycopy(foot.getBytes(), 0, requestBody, pos, foot.length());
+                // File part
+                baos.write(("--" + boundary + "\r\n").getBytes(utf8));
+                baos.write(
+                        ("Content-Disposition: form-data; name=\"file\"; filename=\"" + audioFile.getName() + "\"\r\n")
+                                .getBytes(utf8));
+                baos.write("Content-Type: audio/wav\r\n\r\n".getBytes(utf8));
+                baos.write(fileBytes);
+                baos.write(("\r\n--" + boundary + "--\r\n").getBytes(utf8));
 
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(ENGINE_URL + "/transcribe"))
+                HttpRequest request = HttpRequest.newBuilder().uri(URI.create(ENGINE_URL + "/transcribe"))
                         .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                        .POST(HttpRequest.BodyPublishers.ofByteArray(requestBody))
-                        .build();
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(baos.toByteArray())).build();
 
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 logger.debug("AI Engine transcribe response: {}", response.statusCode());
@@ -111,21 +157,21 @@ public class AIEngineClient {
                 String boundary = "---" + UUID.randomUUID().toString();
                 byte[] fileBytes = Files.readAllBytes(imageFile.toPath());
 
-                String head = "--" + boundary + "\r\n" +
-                        "Content-Disposition: form-data; name=\"file\"; filename=\"" + imageFile.getName() + "\"\r\n" +
-                        "Content-Type: image/png\r\n\r\n";
-                String foot = "\r\n--" + boundary + "--\r\n";
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                java.nio.charset.Charset utf8 = java.nio.charset.StandardCharsets.UTF_8;
 
-                byte[] requestBody = new byte[head.length() + fileBytes.length + foot.length()];
-                System.arraycopy(head.getBytes(), 0, requestBody, 0, head.length());
-                System.arraycopy(fileBytes, 0, requestBody, head.length(), fileBytes.length);
-                System.arraycopy(foot.getBytes(), 0, requestBody, head.length() + fileBytes.length, foot.length());
+                // File part
+                baos.write(("--" + boundary + "\r\n").getBytes(utf8));
+                baos.write(
+                        ("Content-Disposition: form-data; name=\"file\"; filename=\"" + imageFile.getName() + "\"\r\n")
+                                .getBytes(utf8));
+                baos.write("Content-Type: image/png\r\n\r\n".getBytes(utf8));
+                baos.write(fileBytes);
+                baos.write(("\r\n--" + boundary + "--\r\n").getBytes(utf8));
 
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(ENGINE_URL + "/preprocess"))
+                HttpRequest request = HttpRequest.newBuilder().uri(URI.create(ENGINE_URL + "/preprocess"))
                         .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                        .POST(HttpRequest.BodyPublishers.ofByteArray(requestBody))
-                        .build();
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(baos.toByteArray())).build();
 
                 HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
                 if (response.statusCode() == 200) {
@@ -209,14 +255,59 @@ public class AIEngineClient {
         });
     }
 
-    public java.util.concurrent.CompletableFuture<String> resetTraining() {
+    public java.util.concurrent.CompletableFuture<String> trainModel(String language, String dataPath) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             try {
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(ENGINE_URL + "/reset"))
-                        .POST(HttpRequest.BodyPublishers.noBody())
-                        .build();
+                String boundary = "---" + UUID.randomUUID().toString();
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                java.nio.charset.Charset utf8 = java.nio.charset.StandardCharsets.UTF_8;
 
+                // Language part
+                baos.write(("--" + boundary + "\r\n").getBytes(utf8));
+                baos.write("Content-Disposition: form-data; name=\"language\"\r\n\r\n".getBytes(utf8));
+                baos.write(((language != null ? language : "de") + "\r\n").getBytes(utf8));
+
+                // Data path part
+                if (dataPath != null && !dataPath.isEmpty()) {
+                    baos.write(("--" + boundary + "\r\n").getBytes(utf8));
+                    baos.write("Content-Disposition: form-data; name=\"data_path\"\r\n\r\n".getBytes(utf8));
+                    baos.write((dataPath + "\r\n").getBytes(utf8));
+                }
+
+                baos.write(("--" + boundary + "--\r\n").getBytes(utf8));
+
+                HttpRequest request = HttpRequest.newBuilder().uri(URI.create(ENGINE_URL + "/train"))
+                        .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(baos.toByteArray())).build();
+
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                logger.debug("AI Engine train response: {}", response.statusCode());
+                return response.body();
+            } catch (IOException | InterruptedException e) {
+                logger.error("Failed to communicate with AI Engine for training", e);
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    public java.util.concurrent.CompletableFuture<String> resetTraining(String language) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                String url = ENGINE_URL + "/reset";
+                HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(url));
+
+                if (language != null && !language.isEmpty()) {
+                    String boundary = "---" + UUID.randomUUID().toString();
+                    String langPart = "--" + boundary + "\r\n" +
+                            "Content-Disposition: form-data; name=\"language\"\r\n\r\n" +
+                            language + "\r\n--" + boundary + "--\r\n";
+                    builder.header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                            .POST(HttpRequest.BodyPublishers.ofString(langPart));
+                } else {
+                    builder.POST(HttpRequest.BodyPublishers.noBody());
+                }
+
+                HttpRequest request = builder.build();
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 logger.debug("AI Engine reset response: {}", response.statusCode());
                 return response.body();
