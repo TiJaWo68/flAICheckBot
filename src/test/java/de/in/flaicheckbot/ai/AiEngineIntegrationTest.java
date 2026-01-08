@@ -54,7 +54,7 @@ public class AiEngineIntegrationTest {
         }
 
         try {
-            CompletableFuture<String> future = client.recognizeHandwriting(tempFile);
+            CompletableFuture<String> future = client.recognizeHandwriting(tempFile, "en");
             String result = future.get(30, java.util.concurrent.TimeUnit.SECONDS);
 
             assertNotNull(result, "Recognition result should not be null");
@@ -70,7 +70,7 @@ public class AiEngineIntegrationTest {
 
         // Note: This actually triggers training if there is data in the DB
         // In a real CI environment, we'd use a test DB
-        CompletableFuture<String> future = trainingManager.startTraining();
+        CompletableFuture<String> future = trainingManager.startTraining("de");
         String response = future.get(60, java.util.concurrent.TimeUnit.SECONDS);
 
         assertNotNull(response, "Training response should not be null");
