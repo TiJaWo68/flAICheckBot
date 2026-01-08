@@ -71,6 +71,7 @@ public class EvaluationStudentPanel extends JPanel {
 	private BiConsumer<EvaluationStudentPanel, Boolean> maximizeListener;
 	private JLabel lblScore;
 	private JCheckBox chkEvaluated;
+	private String languageCode = "de";
 	private static float globalFontSize = -1f; // -1 means use default
 	private static final List<EvaluationStudentPanel> activeInstances = new java.util.ArrayList<>();
 
@@ -232,8 +233,10 @@ public class EvaluationStudentPanel extends JPanel {
 
 		JButton btnLocal = new JButton("Lokal");
 		btnLocal.setToolTipText("Lokale KI-Erkennung");
-		btnLocal.addActionListener(e -> runLocalRecognition());
+		btnLocal.addActionListener(e -> runLocalRecognition(languageCode));
 		ocrToolbar.add(btnLocal);
+
+		ocrToolbar.add(Box.createHorizontalStrut(5));
 
 		// Manage Cloud Button enablement via Listener
 		de.in.flaicheckbot.MainApp.addAuthListener(status -> {
@@ -699,17 +702,18 @@ public class EvaluationStudentPanel extends JPanel {
 		}).start();
 	}
 
-	public java.util.concurrent.CompletableFuture<Void> runLocalRecognition() {
+	public void setLanguage(String languageCode) {
+		this.languageCode = languageCode;
+	}
+
+	public java.util.concurrent.CompletableFuture<Void> runLocalRecognition(String language) {
 		BufferedImage img = imagePanel.getImage();
 		if (img == null)
 			return java.util.concurrent.CompletableFuture.completedFuture(null);
 		return java.util.concurrent.CompletableFuture.runAsync(() -> {
-			File temp = null;
 			try {
-				temp = File.createTempFile("eval_local_", ".png");
-				ImageIO.write(img, "png", temp);
 				AIEngineClient client = new AIEngineClient();
-				String response = client.recognizeHandwriting(temp).get();
+				String response = client.recognizeHandwriting(img, language).get();
 				ObjectMapper mapper = new ObjectMapper();
 				JsonNode root = mapper.readTree(response);
 				if ("success".equals(root.path("status").asText())) {
@@ -720,9 +724,6 @@ public class EvaluationStudentPanel extends JPanel {
 				logger.error("Local recognition failed", e);
 				SwingUtilities
 						.invokeLater(() -> ExceptionMessage.show(this, "Fehler", "Lokal-Erkennung fehlgeschlagen", e));
-			} finally {
-				if (temp != null)
-					temp.delete();
 			}
 		});
 	}
