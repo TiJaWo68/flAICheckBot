@@ -30,6 +30,7 @@ public class ZoomableImagePanel extends JPanel implements Scrollable {
     private Point startPoint;
     private Point endPoint;
     private Rectangle selection;
+    private Rectangle highlight;
 
     public ZoomableImagePanel() {
         MouseAdapter adapter = new MouseAdapter() {
@@ -136,8 +137,28 @@ public class ZoomableImagePanel extends JPanel implements Scrollable {
         if (imgW > 0 && imgH > 0) {
             currentImage = deepCopy(currentImage.getSubimage(imgX, imgY, imgW, imgH));
             selection = null;
+            highlight = null;
             recalculateSize();
         }
+    }
+
+    /**
+     * Highlights a specific area of the image (e.g. current OCR line).
+     * 
+     * @param rect The rectangle in image coordinates.
+     */
+    public void setHighlight(Rectangle rect) {
+        this.highlight = rect;
+        if (rect != null) {
+            double s = getCurrentScale();
+            Rectangle scaledRect = new Rectangle(
+                    (int) (rect.x * s),
+                    (int) (rect.y * s),
+                    (int) (rect.width * s),
+                    (int) (rect.height * s));
+            scrollRectToVisible(scaledRect);
+        }
+        repaint();
     }
 
     private double getCurrentScale() {
@@ -210,6 +231,25 @@ public class ZoomableImagePanel extends JPanel implements Scrollable {
                 g2.fillRect(selection.x, selection.y, selection.width, selection.height);
                 g2.setColor(Color.BLUE);
                 g2.drawRect(selection.x, selection.y, selection.width, selection.height);
+            }
+
+            if (highlight != null) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                int x = (int) (highlight.x * s);
+                int y = (int) (highlight.y * s);
+                int hw = (int) (highlight.width * s);
+                int hh = (int) (highlight.height * s);
+
+                // Draw a thick yellow frame
+                g2.setStroke(new java.awt.BasicStroke(3f));
+                g2.setColor(new Color(255, 255, 0, 180));
+                g2.drawRect(x, y, hw, hh);
+
+                // Optional: subtle tint
+                g2.setColor(new Color(255, 255, 0, 40));
+                g2.fillRect(x, y, hw, hh);
+
+                g2.dispose();
             }
         }
     }
