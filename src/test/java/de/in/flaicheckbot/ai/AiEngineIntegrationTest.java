@@ -41,15 +41,7 @@ public class AiEngineIntegrationTest {
         // Create a dummy image for testing
         File tempFile = File.createTempFile("test_handwriting", ".png");
         try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-            // Write a tiny valid PNG header or just some bytes if the server is lenient
-            // For real test, we should use a real small image
-            byte[] dummyPng = new byte[] {
-                    (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52,
-                    0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, (byte) 0x90, 0x77, 0x53, (byte) 0xDE, 0, 0, 0, 0x0C,
-                    0x49, 0x44, 0x41, 0x54, 0x08, (byte) 0xD7, 0x63, (byte) 0xF8, (byte) 0xFF, (byte) 0xFF, 0x3F, 0,
-                    0x05, (byte) 0xFE, 0x02, (byte) 0xFE, (byte) 0xDC, 0x44, 0x74, 0x06,
-                    0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, (byte) 0xAE, 0x42, 0x60, (byte) 0x82
-            };
+            byte[] dummyPng = getDummyPng();
             fos.write(dummyPng);
         }
 
@@ -62,6 +54,42 @@ public class AiEngineIntegrationTest {
         } finally {
             Files.deleteIfExists(tempFile.toPath());
         }
+    }
+
+    @Test
+    public void testStreamingRecognition() throws Exception {
+        AIEngineClient client = new AIEngineClient();
+        File tempFile = File.createTempFile("test_stream", ".png");
+        try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+            fos.write(getDummyPng());
+        }
+
+        final int[] lineCount = { 0 };
+        try {
+            CompletableFuture<String> future = client.recognizeHandwritingStreaming(tempFile, "en", true,
+                    (index, total, text, bbox) -> {
+                        lineCount[0]++;
+                        logger.info("Stream Item: {}/{} - {} (BBox: {})", index, total, text, bbox);
+                    });
+
+            String result = future.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            assertNotNull(result, "Streaming result should not be null");
+            // Since it is a dummy image, it might not find lines or might find noise.
+            // But if it finds lines, our listener should be called.
+            logger.info("Streaming Test - Final Result: {}, Lines Callback Count: {}", result, lineCount[0]);
+        } finally {
+            Files.deleteIfExists(tempFile.toPath());
+        }
+    }
+
+    private byte[] getDummyPng() {
+        return new byte[] {
+                (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52,
+                0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, (byte) 0x90, 0x77, 0x53, (byte) 0xDE, 0, 0, 0, 0x0C,
+                0x49, 0x44, 0x41, 0x54, 0x08, (byte) 0xD7, 0x63, (byte) 0xF8, (byte) 0xFF, (byte) 0xFF, 0x3F, 0,
+                0x05, (byte) 0xFE, 0x02, (byte) 0xFE, (byte) 0xDC, 0x44, 0x74, 0x06,
+                0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, (byte) 0xAE, 0x42, 0x60, (byte) 0x82
+        };
     }
 
     @Test
