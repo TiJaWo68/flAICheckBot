@@ -34,7 +34,7 @@ public class DatabaseImportTest {
 
     @Test
     void testCreateTrainingSetAndSample() throws SQLException {
-        int setId = dbManager.createTrainingSet("Test Title", "Original Text Content");
+        int setId = dbManager.createTrainingSet("Test Title", "Original Text Content", "de");
         assertTrue(setId > 0, "Set ID should be positive");
 
         byte[] dummyImage = new byte[] { 0x01, 0x02, 0x03 };
@@ -88,7 +88,7 @@ public class DatabaseImportTest {
         DatabaseManager legacyDbManager = new DatabaseManager(legacyDbPath);
 
         // 3. Try to add a sample. This should fail if not healed.
-        int setId = legacyDbManager.createTrainingSet("Legacy Test", "Some text");
+        int setId = legacyDbManager.createTrainingSet("Legacy Test", "Some text", "de");
 
         // This is expected to fail currently, which reproduces the user's issue
         byte[] dummyImage = new byte[] { 0x01 };
