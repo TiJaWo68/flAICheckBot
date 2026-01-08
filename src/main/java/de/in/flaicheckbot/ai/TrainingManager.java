@@ -24,10 +24,18 @@ public class TrainingManager {
         this.client = HttpClient.newHttpClient();
     }
 
-    public CompletableFuture<String> startTraining() {
+    public CompletableFuture<String> startTraining(String language) {
+        String boundary = "---" + java.util.UUID.randomUUID().toString();
+        String langPart = "--" + boundary + "\r\n" +
+                "Content-Disposition: form-data; name=\"language\"\r\n\r\n" +
+                (language != null ? language : "de") + "\r\n";
+        String foot = "--" + boundary + "--\r\n";
+        String requestBody = langPart + foot;
+
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(ENGINE_URL + "/train"))
-                .POST(HttpRequest.BodyPublishers.noBody())
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
