@@ -710,20 +710,36 @@ public class EvaluationStudentPanel extends JPanel {
 		BufferedImage img = imagePanel.getImage();
 		if (img == null)
 			return java.util.concurrent.CompletableFuture.completedFuture(null);
+
+		// Clear result and reset highlight
+		txtRecognized.setText("");
+		imagePanel.setHighlight(null);
+
 		return java.util.concurrent.CompletableFuture.runAsync(() -> {
 			try {
 				AIEngineClient client = new AIEngineClient();
-				String response = client.recognizeHandwriting(img, language).get();
+				String response = client.recognizeHandwritingStreaming(img, language, true,
+						(index, total, text, bbox) -> {
+							SwingUtilities.invokeLater(() -> {
+								txtRecognized.append(text + "\n");
+								imagePanel.setHighlight(bbox);
+							});
+						}).get();
+
 				ObjectMapper mapper = new ObjectMapper();
 				JsonNode root = mapper.readTree(response);
-				if ("success".equals(root.path("status").asText())) {
-					String text = root.path("text").asText();
-					SwingUtilities.invokeLater(() -> txtRecognized.setText(text));
-				}
+				String finalResultText = root.path("text").asText("");
+
+				SwingUtilities.invokeLater(() -> {
+					txtRecognized.setText(finalResultText);
+					imagePanel.setHighlight(null);
+				});
 			} catch (Exception e) {
 				logger.error("Local recognition failed", e);
-				SwingUtilities
-						.invokeLater(() -> ExceptionMessage.show(this, "Fehler", "Lokal-Erkennung fehlgeschlagen", e));
+				SwingUtilities.invokeLater(() -> {
+					imagePanel.setHighlight(null);
+					ExceptionMessage.show(this, "Fehler", "Lokal-Erkennung fehlgeschlagen", e);
+				});
 			}
 		});
 	}
