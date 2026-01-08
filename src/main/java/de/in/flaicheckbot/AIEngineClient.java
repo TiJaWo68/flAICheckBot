@@ -9,6 +9,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.Scanner;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import javax.imageio.ImageIO;
 
@@ -31,6 +36,21 @@ public class AIEngineClient {
     }
 
     /**
+     * Interface for receiving real-time progress updates during OCR.
+     */
+    public interface ProgressListener {
+        /**
+         * Called when a line has been recognized.
+         * 
+         * @param index The 0-based index of the line.
+         * @param total The total number of lines detected.
+         * @param text  The recognized text.
+         * @param bbox  The bounding box in the original image.
+         */
+        void onLineRecognized(int index, int total, String text, java.awt.Rectangle bbox);
+    }
+
+    /**
      * Consolidates OCR recognition by handling BufferedImage -> Temp File
      * conversion
      * and automatic cleanup.
@@ -45,12 +65,17 @@ public class AIEngineClient {
 
     public java.util.concurrent.CompletableFuture<String> recognizeHandwriting(BufferedImage image, String language,
             boolean usePreprocessing) {
-        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+        return recognizeHandwritingStreaming(image, language, usePreprocessing, null);
+    }
+
+    public CompletableFuture<String> recognizeHandwritingStreaming(BufferedImage image, String language,
+            boolean usePreprocessing, ProgressListener listener) {
+        return CompletableFuture.supplyAsync(() -> {
             File tempFile = null;
             try {
                 tempFile = File.createTempFile("ocr_temp_", ".png");
                 ImageIO.write(image, "png", tempFile);
-                return recognizeHandwriting(tempFile, language, usePreprocessing).get();
+                return recognizeHandwritingStreaming(tempFile, language, usePreprocessing, listener).get();
             } catch (Exception e) {
                 logger.error("Failed to perform consolidated OCR", e);
                 throw new RuntimeException(e);
@@ -68,7 +93,15 @@ public class AIEngineClient {
 
     public java.util.concurrent.CompletableFuture<String> recognizeHandwriting(File imageFile, String language,
             boolean usePreprocessing) {
-        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+        return recognizeHandwritingStreaming(imageFile, language, usePreprocessing, null);
+    }
+
+    /**
+     * Performs OCR and provides real-time updates via the listener.
+     */
+    public CompletableFuture<String> recognizeHandwritingStreaming(File imageFile, String language,
+            boolean usePreprocessing, ProgressListener listener) {
+        return CompletableFuture.supplyAsync(() -> {
             try {
                 String boundary = "---" + UUID.randomUUID().toString();
                 byte[] fileBytes = Files.readAllBytes(imageFile.toPath());
@@ -99,9 +132,50 @@ public class AIEngineClient {
                         .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                         .POST(HttpRequest.BodyPublishers.ofByteArray(baos.toByteArray())).build();
 
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                logger.debug("AI Engine response: {}", response.statusCode());
-                return response.body();
+                HttpResponse<java.io.InputStream> response = client.send(request,
+                        HttpResponse.BodyHandlers.ofInputStream());
+
+                if (response.statusCode() != 200) {
+                    logger.error("AI Engine error: {}", response.statusCode());
+                    throw new RuntimeException("AI Engine error: " + response.statusCode());
+                }
+
+                ObjectMapper mapper = new ObjectMapper();
+                StringBuilder finalResult = new StringBuilder();
+
+                try (Scanner scanner = new Scanner(response.body(), utf8.name())) {
+                    while (scanner.hasNextLine()) {
+                        String line = scanner.nextLine();
+                        if (line.isEmpty())
+                            continue;
+                        try {
+                            JsonNode node = mapper.readTree(line);
+                            String type = node.path("type").asText();
+
+                            if ("line".equals(type) && listener != null) {
+                                int index = node.path("index").asInt();
+                                int total = node.path("total").asInt();
+                                String text = node.path("text").asText();
+                                JsonNode bboxNode = node.path("bbox");
+                                java.awt.Rectangle bbox = null;
+                                if (bboxNode.isArray() && bboxNode.size() == 4) {
+                                    bbox = new java.awt.Rectangle(
+                                            bboxNode.get(0).asInt(),
+                                            bboxNode.get(1).asInt(),
+                                            bboxNode.get(2).asInt(),
+                                            bboxNode.get(3).asInt());
+                                }
+                                listener.onLineRecognized(index, total, text, bbox);
+                            } else if ("final".equals(type)) {
+                                finalResult.append(line);
+                            }
+                        } catch (Exception e) {
+                            logger.warn("Failed to parse streaming line: {}", line, e);
+                        }
+                    }
+                }
+
+                return finalResult.toString();
             } catch (IOException | InterruptedException e) {
                 logger.error("Failed to communicate with AI Engine", e);
                 throw new RuntimeException(e);
