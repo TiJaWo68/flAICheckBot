@@ -103,7 +103,10 @@ public class AiProcessManager {
 
     public synchronized void startEngine() {
         if (isEngineRunning()) {
-            logger.info("AI Engine is already running.");
+            logger.info(
+                    "AI Engine is already running on port 8000. If you changed Python code, please kill the old process manually.");
+            // Optional: We could try to kill it here, but it's safer to let the user know
+            // for now.
             return;
         }
 
