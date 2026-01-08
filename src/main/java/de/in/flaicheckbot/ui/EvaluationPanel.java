@@ -59,6 +59,7 @@ public class EvaluationPanel extends JPanel {
     private JPanel singleViewPanel;
     private DatabaseManager.AssignmentInfo currentAssignment;
     private JComboBox<String> comboFilter;
+    private JComboBox<String> comboLanguage;
     private javax.swing.JProgressBar progressBar;
     private java.util.List<EvaluationStudentPanel> activeStudentPanels = new java.util.ArrayList<>();
 
@@ -96,8 +97,22 @@ public class EvaluationPanel extends JPanel {
         northPanel.add(txtClass);
 
         JButton btnImport = new JButton("Arbeiten importieren");
+        northPanel.add(new JLabel("Sprache:"));
+        comboLanguage = new JComboBox<>(new String[] { "Deutsch", "Englisch", "Französisch", "Spanisch" });
+        comboLanguage.addActionListener(e -> {
+            String lang = mapLanguageCode((String) comboLanguage.getSelectedItem());
+            for (EvaluationStudentPanel panel : activeStudentPanels) {
+                panel.setLanguage(lang);
+            }
+        });
+        northPanel.add(comboLanguage);
+        northPanel.add(Box.createHorizontalStrut(10));
+
+        btnImport = new JButton("Schülerarbeiten importieren");
         btnImport.addActionListener(e -> importWorks());
         northPanel.add(btnImport);
+
+        northPanel.add(Box.createHorizontalStrut(10));
 
         JButton btnNew = new JButton("Neue Korrektur starten");
         btnNew.addActionListener(e -> startNewEvaluation());
@@ -386,6 +401,8 @@ public class EvaluationPanel extends JPanel {
             protected Void doInBackground() throws Exception {
                 for (DatabaseManager.StudentWorkInfo work : workList) {
                     EvaluationStudentPanel panel = new EvaluationStudentPanel(dbManager, work, test);
+                    String lang = mapLanguageCode((String) comboLanguage.getSelectedItem());
+                    panel.setLanguage(lang);
                     panel.setMaximizeListener(EvaluationPanel.this::handleToggleMaximize);
                     panel.addPropertyChangeListener("isEvaluated", evt -> applyFilter());
                     publish(panel);
@@ -517,7 +534,9 @@ public class EvaluationPanel extends JPanel {
                     java.util.concurrent.CompletableFuture<Void> future;
                     switch (actionType) {
                         case "OCR_LOCAL":
-                            future = panel.runLocalRecognition();
+                            String language = (String) comboLanguage.getSelectedItem();
+                            String langCode = mapLanguageCode(language);
+                            future = panel.runLocalRecognition(langCode);
                             break;
                         case "OCR_CLOUD":
                             future = panel.runCloudRecognition();
@@ -643,5 +662,15 @@ public class EvaluationPanel extends JPanel {
         }
         listPanel.revalidate();
         listPanel.repaint();
+    }
+
+    private String mapLanguageCode(String language) {
+        if ("Englisch".equals(language))
+            return "en";
+        if ("Französisch".equals(language))
+            return "fr";
+        if ("Spanisch".equals(language))
+            return "es";
+        return "de";
     }
 }
