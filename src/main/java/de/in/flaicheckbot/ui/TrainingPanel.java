@@ -161,7 +161,7 @@ public class TrainingPanel extends JPanel {
 		btnRecognizeCloud.addActionListener(e -> runRecognition());
 		row1.add(btnRecognizeCloud);
 
-		JButton btnRecognizeLocal = new JButton("Erkennung mit lokaler KI");
+		JButton btnRecognizeLocal = new JButton("lokale Erkennung");
 		btnRecognizeLocal.addActionListener(e -> runLocalRecognition());
 		row1.add(btnRecognizeLocal);
 
@@ -245,16 +245,17 @@ public class TrainingPanel extends JPanel {
 	}
 
 	private void runAiTraining() {
-		logger.info("User triggered AI Fine-Tuning.");
+		String language = (String) comboLanguage.getSelectedItem();
+		logger.info("User triggered AI Fine-Tuning (Language: {}).", language);
 		int confirm = JOptionPane.showConfirmDialog(this,
-				"Möchten Sie das Fine-Tuning der KI mit allen archivierten Daten starten?\nDies kann je nach Datenmenge einige Minuten dauern.",
+				"Möchten Sie das Fine-Tuning der KI für Sprache '" + language
+						+ "' mit allen archivierten Daten starten?\nDies kann je nach Datenmenge einige Minuten dauern.",
 				"KI Training", JOptionPane.YES_NO_OPTION);
 
 		if (confirm == JOptionPane.YES_OPTION) {
 			new Thread(() -> {
 				try {
-					String language = (String) comboLanguage.getSelectedItem();
-					String langCode = "en".equals(language) ? "en" : "de";
+					String langCode = mapLanguageCode(language);
 					de.in.flaicheckbot.ai.TrainingManager trainingManager = new de.in.flaicheckbot.ai.TrainingManager();
 					String response = trainingManager.startTraining(langCode).get();
 
@@ -389,10 +390,10 @@ public class TrainingPanel extends JPanel {
 
 		new Thread(() -> {
 			try {
-				logger.info("Starting local OCR recognition...");
-				de.in.flaicheckbot.AIEngineClient client = new de.in.flaicheckbot.AIEngineClient();
 				String language = (String) comboLanguage.getSelectedItem();
 				String langCode = mapLanguageCode(language);
+				logger.info("Starting local OCR recognition (Language: {})...", language);
+				de.in.flaicheckbot.AIEngineClient client = new de.in.flaicheckbot.AIEngineClient();
 				String response = client.recognizeHandwriting(imgToProcess, langCode).get();
 
 				ObjectMapper mapper = new ObjectMapper();
@@ -418,11 +419,13 @@ public class TrainingPanel extends JPanel {
 	}
 
 	private String mapLanguageCode(String language) {
-		if ("Englisch".equals(language))
+		if (language == null)
+			return "de";
+		if ("Englisch".equals(language) || "English".equals(language) || "en".equals(language))
 			return "en";
-		if ("Französisch".equals(language))
+		if ("Französisch".equals(language) || "French".equals(language) || "fr".equals(language))
 			return "fr";
-		if ("Spanisch".equals(language))
+		if ("Spanisch".equals(language) || "Spanish".equals(language) || "es".equals(language))
 			return "es";
 		return "de";
 	}
@@ -525,11 +528,14 @@ public class TrainingPanel extends JPanel {
 		if (selectedImageFile == null || txtResult.getText().trim().isEmpty()) {
 			return;
 		}
-		logger.info("Saving training set: '{}'...", selectedImageFile.getName());
+		String language = (String) comboLanguage.getSelectedItem();
+		String langCode = mapLanguageCode(language);
+		String text = txtResult.getText();
+		logger.info("Saving training set: '{}' (Language: {}) with text: '{}'...", selectedImageFile.getName(),
+				language,
+				text.length() > 50 ? text.substring(0, 47) + "..." : text);
 		try {
-			String language = (String) comboLanguage.getSelectedItem();
-			String langCode = "en".equals(language) ? "en" : "de";
-			int setId = dbManager.createTrainingSet(selectedImageFile.getName(), txtResult.getText(), langCode);
+			int setId = dbManager.createTrainingSet(selectedImageFile.getName(), text, langCode);
 			// Save the ACTUALLY used image (maybe cropped)
 			BufferedImage usedImage = imagePanel.getImage();
 			java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
