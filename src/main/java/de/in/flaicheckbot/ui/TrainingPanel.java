@@ -55,6 +55,7 @@ public class TrainingPanel extends JPanel {
 	private JTextArea txtResult;
 	private File selectedImageFile;
 	private ZoomableImagePanel imagePanel;
+	private javax.swing.JComboBox<String> comboLanguage;
 
 	public TrainingPanel(DatabaseManager dbManager) {
 		this.dbManager = dbManager;
@@ -79,6 +80,11 @@ public class TrainingPanel extends JPanel {
 
 		lblImageStatus = new JLabel("Kein Bild ausgewählt");
 		imgRow.add(lblImageStatus);
+
+		imgRow.add(Box.createHorizontalStrut(20));
+		imgRow.add(new JLabel("Sprache:"));
+		comboLanguage = new javax.swing.JComboBox<>(new String[] { "Deutsch", "Englisch", "Französisch", "Spanisch" });
+		imgRow.add(comboLanguage);
 
 		JPanel editRow = new JPanel(new WrapLayout(FlowLayout.LEFT, 5, 2));
 		editRow.add(new JLabel("Vorschau-Optionen:"));
@@ -247,8 +253,10 @@ public class TrainingPanel extends JPanel {
 		if (confirm == JOptionPane.YES_OPTION) {
 			new Thread(() -> {
 				try {
+					String language = (String) comboLanguage.getSelectedItem();
+					String langCode = "en".equals(language) ? "en" : "de";
 					de.in.flaicheckbot.ai.TrainingManager trainingManager = new de.in.flaicheckbot.ai.TrainingManager();
-					String response = trainingManager.startTraining().get();
+					String response = trainingManager.startTraining(langCode).get();
 
 					SwingUtilities.invokeLater(() -> {
 						logger.info("AI Training response: {}", response);
@@ -274,6 +282,7 @@ public class TrainingPanel extends JPanel {
 				}
 			}).start();
 		}
+
 	}
 
 	private void resetAiTraining() {
@@ -287,7 +296,7 @@ public class TrainingPanel extends JPanel {
 			new Thread(() -> {
 				try {
 					de.in.flaicheckbot.AIEngineClient client = new de.in.flaicheckbot.AIEngineClient();
-					String response = client.resetTraining().get();
+					String response = client.resetTraining(null).get();
 
 					SwingUtilities.invokeLater(() -> {
 						logger.info("AI Reset response: {}", response);
@@ -379,13 +388,12 @@ public class TrainingPanel extends JPanel {
 		}
 
 		new Thread(() -> {
-			File tempFile = null;
 			try {
-				// Save current processed image to temp file
-				tempFile = File.createTempFile("flaicheck_local_ocr_", ".png");
-				logger.info("Starting local OCR recognition for temp file: {}", tempFile.getName());
+				logger.info("Starting local OCR recognition...");
 				de.in.flaicheckbot.AIEngineClient client = new de.in.flaicheckbot.AIEngineClient();
-				String response = client.recognizeHandwriting(tempFile).get();
+				String language = (String) comboLanguage.getSelectedItem();
+				String langCode = mapLanguageCode(language);
+				String response = client.recognizeHandwriting(imgToProcess, langCode).get();
 
 				ObjectMapper mapper = new ObjectMapper();
 				JsonNode root = mapper.readTree(response);
@@ -405,12 +413,18 @@ public class TrainingPanel extends JPanel {
 			} catch (Exception e) {
 				logger.error("Local AI Recognition failed", e);
 				SwingUtilities.invokeLater(() -> ExceptionMessage.show(this, "Fehler", "Lokale KI Fehler", e));
-			} finally {
-				if (tempFile != null && tempFile.exists()) {
-					tempFile.delete();
-				}
 			}
 		}).start();
+	}
+
+	private String mapLanguageCode(String language) {
+		if ("Englisch".equals(language))
+			return "en";
+		if ("Französisch".equals(language))
+			return "fr";
+		if ("Spanisch".equals(language))
+			return "es";
+		return "de";
 	}
 
 	private void runPreprocessing() {
@@ -513,7 +527,9 @@ public class TrainingPanel extends JPanel {
 		}
 		logger.info("Saving training set: '{}'...", selectedImageFile.getName());
 		try {
-			int setId = dbManager.createTrainingSet(selectedImageFile.getName(), txtResult.getText());
+			String language = (String) comboLanguage.getSelectedItem();
+			String langCode = "en".equals(language) ? "en" : "de";
+			int setId = dbManager.createTrainingSet(selectedImageFile.getName(), txtResult.getText(), langCode);
 			// Save the ACTUALLY used image (maybe cropped)
 			BufferedImage usedImage = imagePanel.getImage();
 			java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
