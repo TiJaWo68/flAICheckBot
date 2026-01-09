@@ -22,3 +22,5 @@ __pycache__/
 /log/
 /docs/
 /tests/
+src/test/resources/local-test-data/
+src/test/java/de/in/flaicheckbot/local/
