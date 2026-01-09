@@ -9,7 +9,6 @@ import java.awt.GridLayout;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -62,8 +61,9 @@ public class EvaluationStudentPanel extends JPanel {
 	private final DatabaseManager.StudentWorkInfo work;
 	private final DatabaseManager.TestInfo testInfo;
 
-	private JTextField txtStudentId; // Changed from JLabel lblStudentId to JTextField txtStudentId
-	private ZoomableImagePanel imagePanel;
+	private JTextField txtStudentId;
+	private List<ZoomableImagePanel> imagePanels = new ArrayList<>();
+	private JPanel pagesPanel;
 	private JTextArea txtRecognized;
 	private JTextArea txtFeedback;
 	private JButton btnMaximize;
@@ -157,38 +157,36 @@ public class EvaluationStudentPanel extends JPanel {
 		// Center: 3 columns
 		JPanel centerPanel = new JPanel(new GridLayout(1, 3, 10, 0));
 
-		// Column 1: Image
+		// Column 1: Image(s)
 		JPanel col1 = new JPanel(new BorderLayout());
 		col1.setBorder(BorderFactory.createTitledBorder("Scan / Foto"));
-		imagePanel = new ZoomableImagePanel();
+
+		pagesPanel = new JPanel();
+		pagesPanel.setLayout(new javax.swing.BoxLayout(pagesPanel, javax.swing.BoxLayout.Y_AXIS));
+
 		if (work.imageData != null) {
-			try {
-				BufferedImage img = ImageIO.read(new ByteArrayInputStream(work.imageData));
-				imagePanel.setImage(img);
-				SwingUtilities.invokeLater(() -> imagePanel.fitToWidth());
-			} catch (IOException e) {
-				logger.error("Failed to load student image", e);
-			}
+			loadImagesIntoPanels();
 		}
-		col1.add(new JScrollPane(imagePanel), BorderLayout.CENTER);
+
+		col1.add(new JScrollPane(pagesPanel), BorderLayout.CENTER);
 
 		JPanel imgToolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
 		JButton btnZoomIn = new JButton("🔍+");
-		btnZoomIn.addActionListener(e -> imagePanel.adjustZoom(0.2));
+		btnZoomIn.addActionListener(e -> imagePanels.forEach(p -> p.adjustZoom(0.2)));
 		JButton btnZoomOut = new JButton("🔍-");
-		btnZoomOut.addActionListener(e -> imagePanel.adjustZoom(-0.2));
+		btnZoomOut.addActionListener(e -> imagePanels.forEach(p -> p.adjustZoom(-0.2)));
 		JButton btnFit = new JButton("⛶");
 		btnFit.setToolTipText("Einpassen");
-		btnFit.addActionListener(e -> imagePanel.fitToScreen());
+		btnFit.addActionListener(e -> imagePanels.forEach(p -> p.fitToScreen()));
 		JButton btnFitWidth = new JButton("↔");
 		btnFitWidth.setToolTipText("Auf Breite einpassen");
-		btnFitWidth.addActionListener(e -> imagePanel.fitToWidth());
+		btnFitWidth.addActionListener(e -> imagePanels.forEach(p -> p.fitToWidth()));
 		JButton btnCrop = new JButton("✂");
 		btnCrop.setToolTipText("Zuschneiden");
-		btnCrop.addActionListener(e -> imagePanel.cropSelection());
+		btnCrop.addActionListener(e -> imagePanels.forEach(p -> p.cropSelection()));
 		JButton btnReset = new JButton("↺");
 		btnReset.setToolTipText("Zurücksetzen");
-		btnReset.addActionListener(e -> resetImage());
+		btnReset.addActionListener(e -> resetImages());
 		JButton btnPreprocess = new JButton("Entzerren");
 		btnPreprocess.addActionListener(e -> runPreprocessing());
 
@@ -562,6 +560,58 @@ public class EvaluationStudentPanel extends JPanel {
 		}
 	}
 
+	private void loadImagesIntoPanels() {
+		pagesPanel.removeAll();
+		imagePanels.clear();
+
+		if (work.imageData == null)
+			return;
+
+		try {
+			List<BufferedImage> images = new ArrayList<>();
+			// Check if it's a PDF (basic signature check)
+			boolean isPdf = false;
+			if (work.imageData.length > 4 && work.imageData[0] == '%' && work.imageData[1] == 'P'
+					&& work.imageData[2] == 'D' && work.imageData[3] == 'F') {
+				isPdf = true;
+			}
+
+			if (isPdf) {
+				File tempPdf = File.createTempFile("flaicheck_view_", ".pdf");
+				java.nio.file.Files.write(tempPdf.toPath(), work.imageData);
+				try {
+					images = de.in.flaicheckbot.util.DocumentTextExtractor.renderPdfToImages(tempPdf);
+				} finally {
+					tempPdf.delete();
+				}
+			} else {
+				BufferedImage img = ImageIO.read(new ByteArrayInputStream(work.imageData));
+				if (img != null) {
+					images.add(img);
+				}
+			}
+
+			for (BufferedImage img : images) {
+				ZoomableImagePanel p = new ZoomableImagePanel();
+				p.setImage(img);
+				p.setBorder(BorderFactory.createMatteBorder(0, 0, 5, 0, Color.GRAY));
+				imagePanels.add(p);
+				pagesPanel.add(p);
+			}
+
+			SwingUtilities.invokeLater(() -> {
+				for (ZoomableImagePanel p : imagePanels) {
+					p.fitToWidth();
+				}
+				pagesPanel.revalidate();
+				pagesPanel.repaint();
+			});
+
+		} catch (Exception e) {
+			logger.error("Failed to load images", e);
+		}
+	}
+
 	private boolean isUpdating = false;
 	private javax.swing.Timer saveTimer;
 
@@ -625,15 +675,8 @@ public class EvaluationStudentPanel extends JPanel {
 		}
 	}
 
-	private void resetImage() {
-		if (work.imageData != null) {
-			try {
-				BufferedImage img = ImageIO.read(new ByteArrayInputStream(work.imageData));
-				imagePanel.setImage(img);
-			} catch (IOException e) {
-				logger.error("Failed to reset image", e);
-			}
-		}
+	private void resetImages() {
+		loadImagesIntoPanels();
 	}
 
 	private void adjustFontSize(float delta) {
@@ -678,26 +721,30 @@ public class EvaluationStudentPanel extends JPanel {
 	}
 
 	private void runPreprocessing() {
-		BufferedImage img = imagePanel.getImage();
-		if (img == null)
+		if (imagePanels.isEmpty())
 			return;
+		// Special case: we preprocess only the first page for now in the UI to keep it
+		// simple,
+		// Or we could loop through all. Let's do all.
 		new Thread(() -> {
-			File temp = null;
-			try {
-				temp = File.createTempFile("eval_prep_", ".png");
-				ImageIO.write(img, "png", temp);
-				AIEngineClient client = new AIEngineClient();
-				byte[] result = client.preprocessImage(temp).get();
-				if (result != null) {
-					BufferedImage resImg = ImageIO.read(new ByteArrayInputStream(result));
-					SwingUtilities.invokeLater(() -> imagePanel.updateImage(resImg));
+			for (ZoomableImagePanel p : imagePanels) {
+				BufferedImage img = p.getImage();
+				File temp = null;
+				try {
+					temp = File.createTempFile("eval_prep_", ".png");
+					ImageIO.write(img, "png", temp);
+					AIEngineClient client = new AIEngineClient();
+					byte[] result = client.preprocessImage(temp).get();
+					if (result != null) {
+						BufferedImage resImg = ImageIO.read(new ByteArrayInputStream(result));
+						SwingUtilities.invokeLater(() -> p.updateImage(resImg));
+					}
+				} catch (Exception e) {
+					logger.error("Preprocessing failed", e);
+				} finally {
+					if (temp != null)
+						temp.delete();
 				}
-			} catch (Exception e) {
-				logger.error("Preprocessing failed", e);
-				SwingUtilities.invokeLater(() -> ExceptionMessage.show(this, "Fehler", "Entzerrung fehlgeschlagen", e));
-			} finally {
-				if (temp != null)
-					temp.delete();
 			}
 		}).start();
 	}
@@ -707,22 +754,33 @@ public class EvaluationStudentPanel extends JPanel {
 	}
 
 	public java.util.concurrent.CompletableFuture<Void> runLocalRecognition(String language) {
-		BufferedImage img = imagePanel.getImage();
-		if (img == null)
+		if (work.imageData == null)
 			return java.util.concurrent.CompletableFuture.completedFuture(null);
 
 		// Clear result and reset highlight
 		txtRecognized.setText("");
-		imagePanel.setHighlight(null);
+		imagePanels.forEach(p -> p.setHighlight(null));
 
 		return java.util.concurrent.CompletableFuture.runAsync(() -> {
+			File tempFile = null;
 			try {
+				// We need to send the ORIGINAL DATA (PDF or Image) to the engine
+				String ext = ".png";
+				if (work.imageData.length > 4 && work.imageData[0] == '%' && work.imageData[1] == 'P'
+						&& work.imageData[2] == 'D' && work.imageData[3] == 'F') {
+					ext = ".pdf";
+				}
+				tempFile = File.createTempFile("eval_reco_", ext);
+				java.nio.file.Files.write(tempFile.toPath(), work.imageData);
+
 				AIEngineClient client = new AIEngineClient();
-				String response = client.recognizeHandwritingStreaming(img, language, true,
-						(index, total, text, bbox) -> {
+				String response = client.recognizeHandwritingStreaming(tempFile, language, true,
+						(page, index, total, text, bbox) -> {
 							SwingUtilities.invokeLater(() -> {
 								txtRecognized.append(text + "\n");
-								imagePanel.setHighlight(bbox);
+								if (page >= 0 && page < imagePanels.size()) {
+									imagePanels.get(page).setHighlight(bbox);
+								}
 							});
 						}).get();
 
@@ -732,47 +790,55 @@ public class EvaluationStudentPanel extends JPanel {
 
 				SwingUtilities.invokeLater(() -> {
 					txtRecognized.setText(finalResultText);
-					imagePanel.setHighlight(null);
+					imagePanels.forEach(p -> p.setHighlight(null));
 				});
 			} catch (Exception e) {
 				logger.error("Local recognition failed", e);
 				SwingUtilities.invokeLater(() -> {
-					imagePanel.setHighlight(null);
+					imagePanels.forEach(p -> p.setHighlight(null));
 					ExceptionMessage.show(this, "Fehler", "Lokal-Erkennung fehlgeschlagen", e);
 				});
+			} finally {
+				if (tempFile != null)
+					tempFile.delete();
 			}
 		});
 	}
 
 	public java.util.concurrent.CompletableFuture<Void> runCloudRecognition() {
-		BufferedImage img = imagePanel.getImage();
-		com.google.auth.Credentials credentials = de.in.flaicheckbot.MainApp.getCredentials();
-		if (img == null || credentials == null)
+		if (imagePanels.isEmpty())
 			return java.util.concurrent.CompletableFuture.completedFuture(null);
+		com.google.auth.Credentials credentials = de.in.flaicheckbot.MainApp.getCredentials();
+		if (credentials == null)
+			return java.util.concurrent.CompletableFuture.completedFuture(null);
+
 		return java.util.concurrent.CompletableFuture.runAsync(() -> {
+			StringBuilder fullText = new StringBuilder();
 			try {
 				ImageAnnotatorSettings settings = ImageAnnotatorSettings.newBuilder()
 						.setCredentialsProvider(FixedCredentialsProvider.create(credentials)).build();
 				try (ImageAnnotatorClient client = ImageAnnotatorClient.create(settings)) {
-					java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-					ImageIO.write(img, "png", baos);
-					ByteString imgBytes = ByteString.copyFrom(baos.toByteArray());
-					com.google.cloud.vision.v1.Image visionImg = com.google.cloud.vision.v1.Image.newBuilder()
-							.setContent(imgBytes).build();
-					Feature feat = Feature.newBuilder().setType(Feature.Type.DOCUMENT_TEXT_DETECTION).build();
-					AnnotateImageRequest request = AnnotateImageRequest.newBuilder().addFeatures(feat)
-							.setImage(visionImg).build();
-					List<AnnotateImageRequest> requests = new ArrayList<>();
-					requests.add(request);
-					BatchAnnotateImagesResponse response = client.batchAnnotateImages(requests);
-					StringBuilder sb = new StringBuilder();
-					for (AnnotateImageResponse res : response.getResponsesList()) {
-						if (res.hasError())
-							sb.append("Error: ").append(res.getError().getMessage()).append("\n");
-						else
-							sb.append(res.getFullTextAnnotation().getText());
+					for (ZoomableImagePanel p : imagePanels) {
+						BufferedImage img = p.getImage();
+						java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+						ImageIO.write(img, "png", baos);
+						ByteString imgBytes = ByteString.copyFrom(baos.toByteArray());
+						com.google.cloud.vision.v1.Image visionImg = com.google.cloud.vision.v1.Image.newBuilder()
+								.setContent(imgBytes).build();
+						Feature feat = Feature.newBuilder().setType(Feature.Type.DOCUMENT_TEXT_DETECTION).build();
+						AnnotateImageRequest request = AnnotateImageRequest.newBuilder().addFeatures(feat)
+								.setImage(visionImg).build();
+						List<AnnotateImageRequest> requests = new ArrayList<>();
+						requests.add(request);
+						BatchAnnotateImagesResponse response = client.batchAnnotateImages(requests);
+						for (AnnotateImageResponse res : response.getResponsesList()) {
+							if (res.hasError())
+								fullText.append("Error: ").append(res.getError().getMessage()).append("\n");
+							else
+								fullText.append(res.getFullTextAnnotation().getText()).append("\n");
+						}
 					}
-					SwingUtilities.invokeLater(() -> txtRecognized.setText(sb.toString()));
+					SwingUtilities.invokeLater(() -> txtRecognized.setText(fullText.toString()));
 				}
 			} catch (Exception e) {
 				logger.error("Cloud recognition failed", e);
