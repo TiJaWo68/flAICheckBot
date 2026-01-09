@@ -79,9 +79,10 @@ public class BatchImporter {
                         System.out.println("Processing language: " + lang);
                         foundLanguages.add(lang);
 
-                        // Find all PNG files
-                        File[] pngFiles = langDir.listFiles((d, name) -> name.toLowerCase().endsWith(".png"));
-                        if (pngFiles == null || pngFiles.length == 0) {
+                        // Find all PNG and PDF files
+                        File[] files = langDir.listFiles((d, name) -> name.toLowerCase().endsWith(".png")
+                                || name.toLowerCase().endsWith(".pdf"));
+                        if (files == null || files.length == 0) {
                             System.out.println("  No samples found for " + lang);
                             continue;
                         }
@@ -91,18 +92,19 @@ public class BatchImporter {
                                 "Batch Import " + lang + " " + System.currentTimeMillis(), "Batch auto-import", lang);
                         System.out.println("  Created training set ID: " + setId);
 
-                        for (File pngFile : pngFiles) {
-                            String baseName = pngFile.getName().substring(0, pngFile.getName().lastIndexOf('.'));
+                        for (File f : files) {
+                            String baseName = f.getName().substring(0, f.getName().lastIndexOf('.'));
                             File txtFile = new File(langDir, baseName + ".txt");
                             if (!txtFile.exists()) {
-                                System.err.println("  Warning: Missing TXT for " + pngFile.getName());
+                                System.err.println("  Warning: Missing TXT for " + f.getName());
                                 continue;
                             }
 
                             String text = Files.readString(txtFile.toPath()).trim();
-                            byte[] imageData = Files.readAllBytes(pngFile.toPath());
-                            dbManager.addTrainingSample(setId, imageData, "image/png", text);
-                            System.out.println("    Imported: " + pngFile.getName());
+                            byte[] imageData = Files.readAllBytes(f.toPath());
+                            String mime = f.getName().toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/png";
+                            dbManager.addTrainingSample(setId, imageData, mime, text);
+                            System.out.println("    Imported: " + f.getName());
                         }
                     }
                 }
