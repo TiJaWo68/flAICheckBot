@@ -94,9 +94,10 @@ public class EvaluationPanel extends JPanel {
 
         JButton btnImport = new JButton("Arbeiten importieren");
         northPanel.add(new JLabel("Sprache:"));
-        comboLanguage = new JComboBox<>(new String[] { "Deutsch", "Englisch", "Französisch", "Spanisch" });
+        comboLanguage = new JComboBox<>(de.in.flaicheckbot.util.LanguageSelectionProvider.getDisplayNames());
         comboLanguage.addActionListener(e -> {
-            String lang = mapLanguageCode((String) comboLanguage.getSelectedItem());
+            String lang = de.in.flaicheckbot.util.LanguageSelectionProvider
+                    .mapToIsoCode((String) comboLanguage.getSelectedItem());
             for (EvaluationStudentPanel panel : activeStudentPanels) {
                 panel.setLanguage(lang);
             }
@@ -394,7 +395,8 @@ public class EvaluationPanel extends JPanel {
             protected Void doInBackground() throws Exception {
                 for (DatabaseManager.StudentWorkInfo work : workList) {
                     EvaluationStudentPanel panel = new EvaluationStudentPanel(dbManager, work, test);
-                    String lang = mapLanguageCode((String) comboLanguage.getSelectedItem());
+                    String lang = de.in.flaicheckbot.util.LanguageSelectionProvider
+                            .mapToIsoCode((String) comboLanguage.getSelectedItem());
                     panel.setLanguage(lang);
                     panel.setMaximizeListener(EvaluationPanel.this::handleToggleMaximize);
                     panel.addPropertyChangeListener("isEvaluated", evt -> applyFilter());
@@ -528,7 +530,7 @@ public class EvaluationPanel extends JPanel {
                     switch (actionType) {
                         case "OCR_LOCAL":
                             String language = (String) comboLanguage.getSelectedItem();
-                            String langCode = mapLanguageCode(language);
+                            String langCode = de.in.flaicheckbot.util.LanguageSelectionProvider.mapToIsoCode(language);
                             future = panel.runLocalRecognition(langCode);
                             break;
                         case "OCR_CLOUD":
@@ -613,7 +615,8 @@ public class EvaluationPanel extends JPanel {
             try {
                 List<StudentResult> results = new ArrayList<>();
                 for (EvaluationStudentPanel panel : activeStudentPanels) {
-                    results.add(new StudentResult(panel.getStudentName(), panel.getFeedback(), panel.getScore()));
+                    results.add(new StudentResult(panel.getStudentName(), panel.getFeedback(),
+                            String.valueOf(panel.getScore())));
                 }
                 PdfExportUtil.export(file, currentAssignment, results);
                 JOptionPane.showMessageDialog(this, "Datei erfolgreich gespeichert unter:\n" + file.getAbsolutePath(),
@@ -657,13 +660,4 @@ public class EvaluationPanel extends JPanel {
         listPanel.repaint();
     }
 
-    private String mapLanguageCode(String language) {
-        if ("Englisch".equals(language))
-            return "en";
-        if ("Französisch".equals(language))
-            return "fr";
-        if ("Spanisch".equals(language))
-            return "es";
-        return "de";
-    }
 }
