@@ -42,12 +42,11 @@ public class AIEngineClient {
         /**
          * Called when a line has been recognized.
          * 
-         * @param index The 0-based index of the line.
-         * @param total The total number of lines detected.
-         * @param text  The recognized text.
-         * @param bbox  The bounding box in the original image.
+         * @param page The 0-based index of the page.
+         * @param text The recognized text.
+         * @param bbox The bounding box in the original image.
          */
-        void onLineRecognized(int index, int total, String text, java.awt.Rectangle bbox);
+        void onLineRecognized(int page, int index, int total, String text, java.awt.Rectangle bbox);
     }
 
     /**
@@ -120,11 +119,16 @@ public class AIEngineClient {
                 baos.write((String.valueOf(usePreprocessing) + "\r\n").getBytes(utf8));
 
                 // File part
+                String contentType = "image/png";
+                if (imageFile.getName().toLowerCase().endsWith(".pdf")) {
+                    contentType = "application/pdf";
+                }
+
                 baos.write(("--" + boundary + "\r\n").getBytes(utf8));
                 baos.write(
                         ("Content-Disposition: form-data; name=\"file\"; filename=\"" + imageFile.getName() + "\"\r\n")
                                 .getBytes(utf8));
-                baos.write("Content-Type: image/png\r\n\r\n".getBytes(utf8));
+                baos.write(("Content-Type: " + contentType + "\r\n\r\n").getBytes(utf8));
                 baos.write(fileBytes);
                 baos.write(("\r\n--" + boundary + "--\r\n").getBytes(utf8));
 
@@ -165,7 +169,8 @@ public class AIEngineClient {
                                             bboxNode.get(2).asInt(),
                                             bboxNode.get(3).asInt());
                                 }
-                                listener.onLineRecognized(index, total, text, bbox);
+                                int page = node.path("page").asInt(0);
+                                listener.onLineRecognized(page, index, total, text, bbox);
                             } else if ("final".equals(type)) {
                                 finalResult.append(line);
                             }
