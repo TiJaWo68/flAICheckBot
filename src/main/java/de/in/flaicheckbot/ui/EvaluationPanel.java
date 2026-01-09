@@ -4,8 +4,6 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.file.Files;
 import java.sql.SQLException;
@@ -14,7 +12,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -33,7 +30,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import de.in.flaicheckbot.db.DatabaseManager;
-import de.in.flaicheckbot.util.DocumentTextExtractor;
 import de.in.flaicheckbot.util.PdfExportUtil;
 import de.in.flaicheckbot.util.PdfExportUtil.StudentResult;
 import de.in.utils.gui.ExceptionMessage;
@@ -262,10 +258,7 @@ public class EvaluationPanel extends JPanel {
 
                         byte[] imageData;
                         if (f.getName().toLowerCase().endsWith(".pdf")) {
-                            BufferedImage img = DocumentTextExtractor.renderPdfToImage(f);
-                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                            ImageIO.write(img, "png", baos);
-                            imageData = baos.toByteArray();
+                            imageData = Files.readAllBytes(f.toPath());
                         } else {
                             imageData = Files.readAllBytes(f.toPath());
                         }
