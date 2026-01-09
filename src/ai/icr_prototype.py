@@ -23,6 +23,7 @@ from fastapi import Response, Form
 from fastapi.responses import StreamingResponse
 import json
 import asyncio
+from pdf2image import convert_from_bytes
 from google import genai
 from google.genai import types
 from google.oauth2.credentials import Credentials
@@ -492,104 +493,126 @@ async def recognize(file: UploadFile = File(...), language: str = Form("de"), pr
         if not content:
             return {"status": "error", "message": "Uploaded file is empty"}
             
-        nparr = np.frombuffer(content, np.uint8)
-        if nparr.size == 0:
-            return {"status": "error", "message": "Could not extract data from file"}
-            
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Detect PDF
+        is_pdf = file.filename.lower().endswith(".pdf") or file.content_type == "application/pdf"
         
-        if img is None:
-            return {"status": "error", "message": "Could not decode image"}
+        pages = []
+        if is_pdf:
+            print(f"PDF detected: {file.filename}. Converting to images...")
+            try:
+                # Convert PDF to images
+                images = convert_from_bytes(content)
+                for img in images:
+                    # convert PIL to OpenCV
+                    open_cv_image = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+                    pages.append(open_cv_image)
+            except Exception as e:
+                print(f"Failed to convert PDF: {e}")
+                return {"status": "error", "message": f"Could not process PDF: {str(e)}"}
+        else:
+            nparr = np.frombuffer(content, np.uint8)
+            if nparr.size == 0:
+                return {"status": "error", "message": "Could not extract data from file"}
+                
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if img is None:
+                return {"status": "error", "message": "Could not decode image"}
+            pages.append(img)
 
         use_preprocess = preprocess.lower() == "true"
-        
-        # 1. Line Segmentation (Internal logic handles deskewing and cleaning)
-        if use_preprocess:
-            line_results = segment_lines(img)
-            print(f"Detected {len(line_results)} lines.")
-        else:
-            # Skip segmentation: treat entire image as one "line"
-            line_results = [(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), [0, 0, img.shape[1], img.shape[0]])]
-            print("Preprocessing disabled: processing whole image.")
-
-        if not line_results:
-            # Fallback for single line/small area
-            line_results = [(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), [0, 0, img.shape[1], img.shape[0]])]
-
         current_model, active_processor = get_model_and_processor(language)
         current_model.eval()
         
         async def event_generator():
-            results = []
-            total = len(line_results)
-            for i, (line_img, bbox) in enumerate(line_results):
-                # Convert to numpy
-                img_np = cv2.cvtColor(np.array(line_img), cv2.COLOR_RGB2BGR)
-                
-                # Preprocessing: Deskew only. 
-                processed_img_np = deskew(img_np)
-                processed_image = Image.fromarray(cv2.cvtColor(processed_img_np, cv2.COLOR_BGR2RGB))
-                
-                # 3. Process
-                pixel_values = active_processor(images=processed_image, return_tensors="pt").pixel_values.to(device)
-                
-                with torch.no_grad():
-                    outputs = current_model.generate(
-                        pixel_values=pixel_values,
-                        output_scores=True,
-                        return_dict_in_generate=True,
-                        num_beams=4,
-                        length_penalty=2.0,
-                        early_stopping=True,
-                        repetition_penalty=1.2
-                    )
-                
-                generated_ids = outputs.sequences
-                line_text = active_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-                
-                # Confidence filtering
-                avg_prob = 1.0 
-                try:
-                    beam_indices = outputs.beam_indices if hasattr(outputs, "beam_indices") else None
-                    transition_scores = current_model.compute_transition_scores(
-                        outputs.sequences, 
-                        outputs.scores, 
-                        beam_indices=beam_indices,
-                        normalize_logits=True
-                    )
-                    avg_prob = torch.exp(transition_scores).mean().item()
-                except Exception as e:
+            all_results = []
+            page_total = len(pages)
+            
+            for page_idx, img in enumerate(pages):
+                # 1. Line Segmentation (Internal logic handles deskewing and cleaning)
+                if use_preprocess:
+                    line_results = segment_lines(img)
+                    print(f"Page {page_idx+1}/{page_total}: Detected {len(line_results)} lines.")
+                else:
+                    # Skip segmentation: treat entire image as one "line"
+                    line_results = [(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), [0, 0, img.shape[1], img.shape[0]])]
+                    print(f"Page {page_idx+1}/{page_total}: Preprocessing disabled: processing whole image.")
+
+                if not line_results:
+                    # Fallback for single line/small area
+                    line_results = [(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), [0, 0, img.shape[1], img.shape[0]])]
+
+                total_lines_on_page = len(line_results)
+                for i, (line_img, bbox) in enumerate(line_results):
+                    # Convert to numpy
+                    img_np = cv2.cvtColor(np.array(line_img), cv2.COLOR_RGB2BGR)
+                    
+                    # Preprocessing: Deskew only. 
+                    processed_img_np = deskew(img_np)
+                    processed_image = Image.fromarray(cv2.cvtColor(processed_img_np, cv2.COLOR_BGR2RGB))
+                    
+                    # 3. Process
+                    pixel_values = active_processor(images=processed_image, return_tensors="pt").pixel_values.to(device)
+                    
+                    with torch.no_grad():
+                        outputs = current_model.generate(
+                            pixel_values=pixel_values,
+                            output_scores=True,
+                            return_dict_in_generate=True,
+                            num_beams=4,
+                            length_penalty=2.0,
+                            early_stopping=True,
+                            repetition_penalty=1.2
+                        )
+                    
+                    generated_ids = outputs.sequences
+                    line_text = active_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                    
+                    # Confidence filtering
                     avg_prob = 1.0 
-                
-                # Pattern rejection
-                if line_text:
-                    if is_garbage(line_text):
-                        print(f"Filtering garbage pattern: '{line_text}'")
-                        continue
+                    try:
+                        beam_indices = outputs.beam_indices if hasattr(outputs, "beam_indices") else None
+                        transition_scores = current_model.compute_transition_scores(
+                            outputs.sequences, 
+                            outputs.scores, 
+                            beam_indices=beam_indices,
+                            normalize_logits=True
+                        )
+                        avg_prob = torch.exp(transition_scores).mean().item()
+                    except Exception as e:
+                        avg_prob = 1.0 
                     
-                    threshold = 0.35 if len(line_text) > 15 else 0.5
-                    if avg_prob < threshold:
-                        print(f"Skipping low confidence line ({avg_prob:.2f}): '{line_text}'")
-                        continue
+                    # Pattern rejection
+                    if line_text:
+                        if is_garbage(line_text):
+                            print(f"Filtering garbage pattern: '{line_text}'")
+                            continue
                         
-                    results.append(line_text)
-                    
-                    # Yield progress update
-                    yield json.dumps({
-                        "type": "line",
-                        "index": i,
-                        "total": total,
-                        "text": line_text,
-                        "bbox": bbox
-                    }) + "\n"
+                        threshold = 0.35 if len(line_text) > 15 else 0.5
+                        if avg_prob < threshold:
+                            print(f"Skipping low confidence line ({avg_prob:.2f}): '{line_text}'")
+                            continue
+                            
+                        all_results.append(line_text)
+                        
+                        # Yield progress update
+                        yield json.dumps({
+                            "type": "line",
+                            "index": i,
+                            "total": total_lines_on_page,
+                            "page": page_idx,
+                            "page_total": page_total,
+                            "text": line_text,
+                            "bbox": bbox
+                        }) + "\n"
             
             # Yield final result
-            final_text = "\n".join(results)
+            final_text = "\n".join(all_results)
             yield json.dumps({
                 "type": "final",
                 "status": "success",
                 "text": final_text,
-                "lines_detected": total
+                "pages_processed": page_total
             }) + "\n"
 
         return StreamingResponse(event_generator(), media_type="application/x-ndjson")
