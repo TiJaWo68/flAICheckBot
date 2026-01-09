@@ -97,34 +97,38 @@ public class DocumentTextExtractor {
      * Renders all pages of a PDF to a single, vertically concatenated
      * BufferedImage.
      */
-    public static BufferedImage renderPdfToImage(File file) throws Exception {
+    public static List<BufferedImage> renderPdfToImages(File file) throws Exception {
         try (PDDocument document = Loader.loadPDF(file)) {
             PDFRenderer renderer = new PDFRenderer(document);
             List<BufferedImage> pageImages = new ArrayList<>();
-            int totalWidth = 0;
-            int totalHeight = 0;
-
             for (int i = 0; i < document.getNumberOfPages(); i++) {
-                // Render at 150 DPI for good OCR results while keeping memory usage reasonable
-                BufferedImage img = renderer.renderImageWithDPI(i, 150);
-                pageImages.add(img);
-                totalWidth = Math.max(totalWidth, img.getWidth());
-                totalHeight += img.getHeight();
+                pageImages.add(renderer.renderImageWithDPI(i, 150));
             }
-
-            if (pageImages.isEmpty()) {
-                return null;
-            }
-
-            BufferedImage combined = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_RGB);
-            Graphics2D g2 = combined.createGraphics();
-            int currentY = 0;
-            for (BufferedImage img : pageImages) {
-                g2.drawImage(img, 0, currentY, null);
-                currentY += img.getHeight();
-            }
-            g2.dispose();
-            return combined;
+            return pageImages;
         }
+    }
+
+    public static BufferedImage renderPdfToImage(File file) throws Exception {
+        List<BufferedImage> pageImages = renderPdfToImages(file);
+        if (pageImages.isEmpty()) {
+            return null;
+        }
+
+        int totalWidth = 0;
+        int totalHeight = 0;
+        for (BufferedImage img : pageImages) {
+            totalWidth = Math.max(totalWidth, img.getWidth());
+            totalHeight += img.getHeight();
+        }
+
+        BufferedImage combined = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2 = combined.createGraphics();
+        int currentY = 0;
+        for (BufferedImage img : pageImages) {
+            g2.drawImage(img, 0, currentY, null);
+            currentY += img.getHeight();
+        }
+        g2.dispose();
+        return combined;
     }
 }
