@@ -83,13 +83,19 @@ public class AiEngineIntegrationTest {
     }
 
     private byte[] getDummyPng() {
-        return new byte[] {
-                (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52,
-                0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, (byte) 0x90, 0x77, 0x53, (byte) 0xDE, 0, 0, 0, 0x0C,
-                0x49, 0x44, 0x41, 0x54, 0x08, (byte) 0xD7, 0x63, (byte) 0xF8, (byte) 0xFF, (byte) 0xFF, 0x3F, 0,
-                0x05, (byte) 0xFE, 0x02, (byte) 0xFE, (byte) 0xDC, 0x44, 0x74, 0x06,
-                0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, (byte) 0xAE, 0x42, 0x60, (byte) 0x82
-        };
+        try {
+            java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(10, 10,
+                    java.awt.image.BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g2 = img.createGraphics();
+            g2.setColor(java.awt.Color.WHITE);
+            g2.fillRect(0, 0, 10, 10);
+            g2.dispose();
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(img, "png", baos);
+            return baos.toByteArray();
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Test
