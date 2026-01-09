@@ -4,7 +4,7 @@ STT (Speech-to-Text) via Whisper, and image preprocessing.
 
 @author TiJaWo68 in cooperation with Gemini 3 Flash using Antigravity
 """
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import uvicorn
 import shutil
 import os
@@ -491,7 +491,8 @@ async def recognize(file: UploadFile = File(...), language: str = Form("de"), pr
         # Read content first to avoid SpooledTemporaryFile issues
         content = await file.read()
         if not content:
-            return {"status": "error", "message": "Uploaded file is empty"}
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
             
         # Detect PDF
         is_pdf = file.filename.lower().endswith(".pdf") or file.content_type == "application/pdf"
@@ -512,12 +513,14 @@ async def recognize(file: UploadFile = File(...), language: str = Form("de"), pr
         else:
             nparr = np.frombuffer(content, np.uint8)
             if nparr.size == 0:
-                return {"status": "error", "message": "Could not extract data from file"}
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="Could not extract data from file")
                 
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
             if img is None:
-                return {"status": "error", "message": "Could not decode image"}
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="Could not decode image")
             pages.append(img)
 
         use_preprocess = preprocess.lower() == "true"
@@ -616,6 +619,8 @@ async def recognize(file: UploadFile = File(...), language: str = Form("de"), pr
             }) + "\n"
 
         return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(f"Error in /recognize: {traceback.format_exc()}")
@@ -787,7 +792,8 @@ async def preprocess(file: UploadFile = File(...)):
         # 1. Read image
         image_bytes = await file.read()
         if not image_bytes:
-            return {"status": "error", "message": "Uploaded image for preprocessing is empty"}
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Uploaded image for preprocessing is empty")
             
         nparr = np.frombuffer(image_bytes, np.uint8)
         if nparr.size == 0:
