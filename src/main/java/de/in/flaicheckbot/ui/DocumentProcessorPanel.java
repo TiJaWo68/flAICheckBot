@@ -55,6 +55,7 @@ public abstract class DocumentProcessorPanel extends JPanel {
     protected JPanel pagesPanel;
     protected JPanel segmentsPanel;
     protected List<ZoomableImagePanel> imagePanels = new ArrayList<>();
+    protected List<RecognitionSegment> recognitionSegments = new ArrayList<>();
     protected File currentFile;
     protected byte[] currentRawData;
     protected boolean showDebugSegments = false;
@@ -290,18 +291,32 @@ public abstract class DocumentProcessorPanel extends JPanel {
     }
 
     public java.util.concurrent.CompletableFuture<Void> runLocalRecognition(String langCode) {
+        return runLocalRecognition(langCode, false, null);
+    }
+
+    public java.util.concurrent.CompletableFuture<Void> runLocalRecognition(String langCode,
+            java.util.function.Consumer<RecognitionSegment> segmentCallback) {
+        return runLocalRecognition(langCode, false, segmentCallback);
+    }
+
+    public java.util.concurrent.CompletableFuture<Void> runLocalRecognition(String langCode, boolean silent,
+            java.util.function.Consumer<RecognitionSegment> segmentCallback) {
         if (imagePanels.isEmpty())
             return java.util.concurrent.CompletableFuture.completedFuture(null);
 
         // Clear previous results and debug segments
-        txtResult.setText("");
+        if (!silent) {
+            txtResult.setText("");
+        }
+        recognitionSegments.clear();
         if (segmentsPanel != null) {
             segmentsPanel.removeAll();
             segmentsPanel.revalidate();
             segmentsPanel.repaint();
         }
 
-        logger.info("Starting local recognition for {} images with language '{}'", imagePanels.size(), langCode);
+        logger.info("Starting local recognition for {} images with language '{}' (silent={})", imagePanels.size(),
+                langCode, silent);
 
         return java.util.concurrent.CompletableFuture.runAsync(() -> {
             try {
@@ -322,11 +337,23 @@ public abstract class DocumentProcessorPanel extends JPanel {
                     // Process each page sequentially
                     client.recognizeHandwritingStreaming(imgToProcess, langCode, true,
                             (page, index, total, text, bbox, base64Image, rejected, reason) -> {
-                                SwingUtilities.invokeLater(() -> {
-                                    if (!rejected) {
-                                        txtResult.append(text + "\n");
+                                // Store segment for training selection
+                                if (base64Image != null) {
+                                    RecognitionSegment seg = new RecognitionSegment(page, index, text, base64Image,
+                                            rejected, reason);
+                                    recognitionSegments.add(seg);
+                                    if (segmentCallback != null) {
+                                        segmentCallback.accept(seg);
                                     }
-                                    panel.setHighlight(bbox);
+                                }
+
+                                SwingUtilities.invokeLater(() -> {
+                                    if (!silent) {
+                                        if (!rejected) {
+                                            txtResult.append(text + "\n");
+                                        }
+                                        panel.setHighlight(bbox);
+                                    }
 
                                     // Add to debug segments panel
                                     if (showDebugSegments && base64Image != null) {
@@ -525,5 +552,27 @@ public abstract class DocumentProcessorPanel extends JPanel {
                 }
             }
         });
+    }
+
+    /**
+     * Represents a single recognized line segment with its image and text.
+     */
+    public static class RecognitionSegment {
+        public int page;
+        public int index;
+        public String text;
+        public String base64Image;
+        public boolean rejected;
+        public String reason;
+
+        public RecognitionSegment(int page, int index, String text, String base64Image, boolean rejected,
+                String reason) {
+            this.page = page;
+            this.index = index;
+            this.text = text;
+            this.base64Image = base64Image;
+            this.rejected = rejected;
+            this.reason = reason;
+        }
     }
 }
