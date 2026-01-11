@@ -14,11 +14,13 @@ import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JOptionPane;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
+import java.util.Base64;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -53,6 +55,7 @@ public abstract class DocumentProcessorPanel extends JPanel {
     protected final DatabaseManager dbManager;
     protected JTextArea txtResult;
     protected JPanel pagesPanel;
+    protected JPanel segmentsPanel;
     protected List<ZoomableImagePanel> imagePanels = new ArrayList<>();
     protected File currentFile;
     protected byte[] currentRawData;
@@ -97,7 +100,18 @@ public abstract class DocumentProcessorPanel extends JPanel {
         setupTextEventListeners(txtResult);
 
         rightPanel.add(new JScrollPane(txtResult), BorderLayout.CENTER);
-        splitPane.setRightComponent(rightPanel);
+
+        // Right Most: Segments (Visual Debug)
+        JPanel debugPanel = new JPanel(new BorderLayout());
+        debugPanel.setBorder(BorderFactory.createTitledBorder("Zeilen-Segmente (Debug)"));
+        segmentsPanel = new JPanel();
+        segmentsPanel.setLayout(new BoxLayout(segmentsPanel, BoxLayout.Y_AXIS));
+        debugPanel.add(new JScrollPane(segmentsPanel), BorderLayout.CENTER);
+
+        JSplitPane innerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, rightPanel, debugPanel);
+        innerSplit.setResizeWeight(0.5);
+
+        splitPane.setRightComponent(innerSplit);
 
         add(splitPane, BorderLayout.CENTER);
 
@@ -272,56 +286,160 @@ public abstract class DocumentProcessorPanel extends JPanel {
         }).start();
     }
 
-    protected java.util.concurrent.CompletableFuture<Void> runLocalRecognition(String langCode) {
+    public java.util.concurrent.CompletableFuture<Void> runLocalRecognition(String langCode) {
         if (imagePanels.isEmpty())
             return java.util.concurrent.CompletableFuture.completedFuture(null);
 
+        // Clear previous results and debug segments
         txtResult.setText("");
-        imagePanels.forEach(p -> p.setHighlight(null));
+        segmentsPanel.removeAll();
+        segmentsPanel.revalidate();
+        segmentsPanel.repaint();
 
         return java.util.concurrent.CompletableFuture.runAsync(() -> {
-            File fileToUse = currentFile;
-            File tempFile = null;
             try {
-                if (fileToUse == null && currentRawData != null) {
-                    String ext = (currentRawData.length > 4 && currentRawData[0] == '%' && currentRawData[1] == 'P'
-                            && currentRawData[2] == 'D' && currentRawData[3] == 'F') ? ".pdf" : ".png";
-                    tempFile = File.createTempFile("flaicheck_ocr_", ext);
-                    java.nio.file.Files.write(tempFile.toPath(), currentRawData);
-                    fileToUse = tempFile;
+                AIEngineClient client = new AIEngineClient();
+                StringBuilder fullText = new StringBuilder();
+
+                for (int i = 0; i < imagePanels.size(); i++) {
+                    ZoomableImagePanel panel = imagePanels.get(i);
+                    BufferedImage imgToProcess = panel.getImage();
+
+                    if (imgToProcess == null)
+                        continue;
+
+                    // Process each page sequentially
+                    String response = client.recognizeHandwritingStreaming(imgToProcess, langCode, true,
+                            (page, index, total, text, bbox, base64Image, rejected, reason) -> {
+                                SwingUtilities.invokeLater(() -> {
+                                    if (!rejected) {
+                                        txtResult.append(text + "\n");
+                                    }
+                                    panel.setHighlight(bbox);
+
+                                    // Add to debug segments panel
+                                    if (base64Image != null) {
+                                        try {
+                                            byte[] bytes = Base64.getDecoder().decode(base64Image);
+                                            BufferedImage segmentImg = ImageIO.read(new ByteArrayInputStream(bytes));
+                                            if (segmentImg != null) {
+                                                JPanel segmentBox = new JPanel(new BorderLayout(5, 5));
+                                                segmentBox.setBorder(BorderFactory.createCompoundBorder(
+                                                        BorderFactory.createLineBorder(
+                                                                rejected ? Color.RED : Color.LIGHT_GRAY),
+                                                        BorderFactory.createEmptyBorder(5, 5, 5, 5)));
+
+                                                if (rejected) {
+                                                    segmentBox.setBackground(new Color(255, 230, 230));
+                                                }
+
+                                                // Image (limit size in list)
+                                                int dispW = segmentImg.getWidth() / 2;
+                                                int dispH = segmentImg.getHeight() / 2;
+                                                if (dispW < 50)
+                                                    dispW = 50;
+
+                                                JLabel imgLabel = new JLabel(new javax.swing.ImageIcon(
+                                                        segmentImg.getScaledInstance(dispW, dispH,
+                                                                BufferedImage.SCALE_SMOOTH)));
+
+                                                // Interaction: Highlight on hover and enlarge on click
+                                                imgLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+                                                    @Override
+                                                    public void mouseClicked(java.awt.event.MouseEvent e) {
+                                                        // Enlarged popup (3x)
+                                                        int scale = 3;
+                                                        BufferedImage enlarged = new BufferedImage(
+                                                                segmentImg.getWidth() * scale,
+                                                                segmentImg.getHeight() * scale,
+                                                                BufferedImage.TYPE_INT_ARGB);
+                                                        java.awt.Graphics2D g = enlarged.createGraphics();
+                                                        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+                                                                java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                                                        g.drawImage(segmentImg, 0, 0, segmentImg.getWidth() * scale,
+                                                                segmentImg.getHeight() * scale, null);
+                                                        g.dispose();
+
+                                                        JPanel popupPanel = new JPanel(new BorderLayout(10, 10));
+                                                        popupPanel.add(new JLabel(new javax.swing.ImageIcon(enlarged)),
+                                                                BorderLayout.CENTER);
+
+                                                        String displayText = rejected ? "[VERWORFEN: " + reason + "]"
+                                                                : text;
+                                                        JLabel textLabel = new JLabel(displayText);
+                                                        textLabel.setFont(new java.awt.Font("Monospaced",
+                                                                java.awt.Font.BOLD, 18));
+                                                        if (rejected)
+                                                            textLabel.setForeground(Color.RED);
+                                                        popupPanel.add(textLabel, BorderLayout.SOUTH);
+
+                                                        JOptionPane.showMessageDialog(DocumentProcessorPanel.this,
+                                                                popupPanel, "Segment-Details",
+                                                                JOptionPane.PLAIN_MESSAGE);
+                                                    }
+
+                                                    @Override
+                                                    public void mouseEntered(java.awt.event.MouseEvent e) {
+                                                        panel.setHighlight(bbox);
+                                                        segmentBox.setBackground(rejected ? new Color(255, 200, 200)
+                                                                : new Color(230, 240, 255));
+                                                        imgLabel.setCursor(
+                                                                new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+                                                    }
+
+                                                    @Override
+                                                    public void mouseExited(java.awt.event.MouseEvent e) {
+                                                        segmentBox.setBackground(
+                                                                rejected ? new Color(255, 230, 230) : null);
+                                                    }
+                                                });
+                                                segmentBox.add(imgLabel, BorderLayout.CENTER);
+
+                                                String labelText = rejected
+                                                        ? "<html><font color='red'><b>REJECTED:</b> " + reason
+                                                                + "</font></html>"
+                                                        : text;
+                                                JLabel lblText = new JLabel(labelText);
+                                                segmentBox.add(lblText, BorderLayout.SOUTH);
+
+                                                segmentsPanel.add(segmentBox);
+                                                segmentsPanel.revalidate();
+
+                                                // Auto-scroll to latest segment
+                                                SwingUtilities.invokeLater(() -> segmentBox
+                                                        .scrollRectToVisible(new java.awt.Rectangle(0, 0, 1, 1)));
+                                            }
+                                        } catch (Exception ex) {
+                                            logger.warn("Failed to decode segment image", ex);
+                                        }
+                                    }
+                                });
+                            }).get();
+
+                    // Update full text from final response
+                    if (response != null) {
+                        try {
+                            ObjectMapper mapper = new ObjectMapper();
+                            JsonNode root = mapper.readTree(response);
+                            String pageText = root.path("text").asText("");
+                            fullText.append(pageText).append("\n");
+                        } catch (Exception e) {
+                            logger.warn("Failed to parse final OCR response", e);
+                        }
+                    }
                 }
 
-                if (fileToUse == null)
-                    return;
-
-                AIEngineClient client = new AIEngineClient();
-                String response = client.recognizeHandwritingStreaming(fileToUse, langCode, true,
-                        (page, index, total, text, bbox) -> {
-                            SwingUtilities.invokeLater(() -> {
-                                txtResult.append(text + "\n");
-                                if (page >= 0 && page < imagePanels.size()) {
-                                    imagePanels.get(page).setHighlight(bbox);
-                                }
-                            });
-                        }).get();
-
-                ObjectMapper mapper = new ObjectMapper();
-                JsonNode root = mapper.readTree(response);
-                String finalResultText = root.path("text").asText("");
-
                 SwingUtilities.invokeLater(() -> {
-                    txtResult.setText(finalResultText);
+                    txtResult.setText(fullText.toString().trim());
                     imagePanels.forEach(p -> p.setHighlight(null));
                 });
+
             } catch (Exception e) {
                 logger.error("Local OCR failed", e);
                 SwingUtilities.invokeLater(() -> {
                     imagePanels.forEach(p -> p.setHighlight(null));
                     ExceptionMessage.show(this, "Fehler", "Lokale KI Fehler", e);
                 });
-            } finally {
-                if (tempFile != null)
-                    tempFile.delete();
             }
         });
     }
