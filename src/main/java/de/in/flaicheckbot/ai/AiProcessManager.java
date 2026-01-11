@@ -34,7 +34,7 @@ public class AiProcessManager {
         } else {
             recalculatePythonPath();
         }
-        this.scriptPath = new File(aiDir, "icr_prototype.py").getAbsolutePath();
+        this.scriptPath = new File(aiDir, "app/main.py").getAbsolutePath();
 
         logger.info("KI-Engine paths initialized. Home: {}, Python: {}, Script: {}", aiDir.getAbsolutePath(),
                 pythonPath, scriptPath);
@@ -111,8 +111,8 @@ public class AiProcessManager {
         }
 
         try {
-            logger.info("Starting AI Engine: {} {}", pythonPath, scriptPath);
-            ProcessBuilder pb = new ProcessBuilder(pythonPath, scriptPath);
+            logger.info("Starting AI Engine: {} -m app.main", pythonPath);
+            ProcessBuilder pb = new ProcessBuilder(pythonPath, "-m", "app.main");
             pb.directory(aiDir);
 
             // Redirect output to log file
@@ -168,7 +168,8 @@ public class AiProcessManager {
         logger.info("Waiting for AI Engine to initialize...");
         for (int i = 0; i < timeoutSeconds; i++) {
             if (isEngineRunning()) {
-                logger.info("AI Engine is ready.");
+                String version = fetchVersion();
+                logger.info("AI Engine is ready (v{}).", version);
                 return true;
             }
             try {
@@ -181,5 +182,31 @@ public class AiProcessManager {
         }
         logger.error("AI Engine failed to start within {}s.", timeoutSeconds);
         return false;
+    }
+
+    private String fetchVersion() {
+        try {
+            URL url = java.net.URI.create("http://127.0.0.1:8000/version").toURL();
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(1000);
+            connection.setReadTimeout(1000);
+            if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                try (java.io.InputStream in = connection.getInputStream();
+                        java.util.Scanner scanner = new java.util.Scanner(in)) {
+                    if (scanner.hasNext()) {
+                        String response = scanner.useDelimiter("\\A").next();
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"version\"\\s*:\\s*\"([^\"]+)\"")
+                                .matcher(response);
+                        if (m.find()) {
+                            return m.group(1);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to fetch version from engine", e);
+        }
+        return "unknown";
     }
 }
