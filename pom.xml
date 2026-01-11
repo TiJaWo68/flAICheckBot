@@ -5,7 +5,7 @@
 
 	<groupId>de.in.flaicheckbot</groupId>
 	<artifactId>flAICheckBot</artifactId>
-	<version>0.2.0</version>
+	<version>0.3.0</version>
 
 	<properties>
 		<maven.compiler.source>21</maven.compiler.source>
@@ -30,6 +30,11 @@
 		<dependency>
 			<groupId>com.formdev</groupId>
 			<artifactId>flatlaf</artifactId>
+			<version>3.7</version>
+		</dependency>
+		<dependency>
+			<groupId>com.formdev</groupId>
+			<artifactId>flatlaf-extras</artifactId>
 			<version>3.7</version>
 		</dependency>
 
