@@ -1,6 +1,5 @@
 package de.in.flaicheckbot.ui;
 
-import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -36,17 +35,20 @@ public class TrainingPanel extends DocumentProcessorPanel {
 	public TrainingPanel(DatabaseManager dbManager) {
 		super(dbManager);
 		initBaseUI();
+		addTrainingActionButtons();
+	}
 
+	protected void addTrainingActionButtons() {
 		// Bottom: Action Buttons
 		JPanel actionPanel = new JPanel();
-		actionPanel.setLayout(new BoxLayout(actionPanel, BoxLayout.LINE_AXIS));
+		actionPanel.setLayout(new javax.swing.BoxLayout(actionPanel, javax.swing.BoxLayout.LINE_AXIS));
 
 		JButton btnAiReset = new JButton("KI Reset");
 		btnAiReset.setToolTipText("Setzt das KI-Training zurück (Löscht gelernte Daten)");
 		btnAiReset.addActionListener(e -> resetAiTraining());
 		actionPanel.add(btnAiReset);
 
-		actionPanel.add(Box.createHorizontalGlue());
+		actionPanel.add(javax.swing.Box.createHorizontalGlue());
 
 		JButton btnTrain = new JButton("KI-Training");
 		btnTrain.setToolTipText("KI-Training (Fine-Tuning) starten");
@@ -56,7 +58,7 @@ public class TrainingPanel extends DocumentProcessorPanel {
 		JButton btnSave = new JButton("Als Trainingsdaten speichern");
 		btnSave.addActionListener(e -> saveToDatabase());
 		actionPanel.add(btnSave);
-		add(actionPanel, BorderLayout.SOUTH);
+		add(actionPanel, java.awt.BorderLayout.SOUTH);
 	}
 
 	@Override
