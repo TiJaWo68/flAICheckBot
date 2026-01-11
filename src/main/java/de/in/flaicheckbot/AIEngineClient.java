@@ -42,11 +42,17 @@ public class AIEngineClient {
         /**
          * Called when a line has been recognized.
          * 
-         * @param page The 0-based index of the page.
-         * @param text The recognized text.
-         * @param bbox The bounding box in the original image.
+         * @param page     The 0-based index of the page.
+         * @param index    The index of the line on the page.
+         * @param total    Total lines on page.
+         * @param text     The recognized text.
+         * @param bbox     The bounding box in the original image.
+         * @param image    The segment image (base64 encoded).
+         * @param rejected Whether the segment was rejected by AI/noise filters.
+         * @param reason   The reason for rejection.
          */
-        void onLineRecognized(int page, int index, int total, String text, java.awt.Rectangle bbox);
+        void onLineRecognized(int page, int index, int total, String text, java.awt.Rectangle bbox, String image,
+                boolean rejected, String reason);
     }
 
     /**
@@ -170,7 +176,10 @@ public class AIEngineClient {
                                             bboxNode.get(3).asInt());
                                 }
                                 int page = node.path("page").asInt(0);
-                                listener.onLineRecognized(page, index, total, text, bbox);
+                                String image = node.path("image").asText(null);
+                                boolean rejected = node.path("rejected").asBoolean(false);
+                                String reason = node.path("reason").asText("");
+                                listener.onLineRecognized(page, index, total, text, bbox, image, rejected, reason);
                             } else if ("final".equals(type)) {
                                 finalResult.append(line);
                             }
@@ -393,6 +402,37 @@ public class AIEngineClient {
             } catch (IOException | InterruptedException e) {
                 logger.error("Failed to reset AI Engine", e);
                 throw new RuntimeException(e);
+            }
+        });
+    }
+
+    public static class EngineStatus {
+        public String status;
+        public String model;
+        public String device;
+        public String deviceName;
+        public String deviceIcon;
+    }
+
+    public java.util.concurrent.CompletableFuture<EngineStatus> getStatus() {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(ENGINE_URL + "/ping"))
+                        .GET()
+                        .build();
+
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() == 200) {
+                    ObjectMapper mapper = new ObjectMapper();
+                    return mapper.readValue(response.body(), EngineStatus.class);
+                } else {
+                    logger.warn("AI Engine ping failed: {}", response.statusCode());
+                    return null;
+                }
+            } catch (Exception e) {
+                logger.error("Failed to get AI Engine status", e);
+                return null;
             }
         });
     }
