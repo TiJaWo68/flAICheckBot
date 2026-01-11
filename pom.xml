@@ -5,7 +5,7 @@
 
 	<groupId>de.in.flaicheckbot</groupId>
 	<artifactId>flAICheckBot</artifactId>
-	<version>0.3.0</version>
+	<version>0.4.0</version>
 
 	<properties>
 		<maven.compiler.source>21</maven.compiler.source>
@@ -119,10 +119,6 @@
 				<exclusion>
 					<groupId>com.github.oshi</groupId>
 					<artifactId>oshi-core</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.jfree</groupId>
-					<artifactId>jcommon</artifactId>
 				</exclusion>
 			</exclusions>
 		</dependency>
