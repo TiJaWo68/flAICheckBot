@@ -26,6 +26,9 @@ public class AiEngineIntegrationTest {
 
     @BeforeAll
     public static void checkEngine() {
+        // Ensure DB exists and has tables
+        new de.in.flaicheckbot.db.DatabaseManager("flaicheckbot.db");
+
         AiProcessManager manager = new AiProcessManager();
         if (!manager.isEngineRunning()) {
             logger.info("AI Engine not running, starting for test...");
