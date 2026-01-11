@@ -25,8 +25,6 @@ import java.util.Base64;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.gax.core.FixedCredentialsProvider;
 import com.google.cloud.vision.v1.AnnotateImageRequest;
 import com.google.cloud.vision.v1.AnnotateImageResponse;
@@ -296,20 +294,26 @@ public abstract class DocumentProcessorPanel extends JPanel {
         segmentsPanel.revalidate();
         segmentsPanel.repaint();
 
+        logger.info("Starting local recognition for {} images with language '{}'", imagePanels.size(), langCode);
+
         return java.util.concurrent.CompletableFuture.runAsync(() -> {
             try {
                 AIEngineClient client = new AIEngineClient();
-                StringBuilder fullText = new StringBuilder();
 
                 for (int i = 0; i < imagePanels.size(); i++) {
                     ZoomableImagePanel panel = imagePanels.get(i);
                     BufferedImage imgToProcess = panel.getImage();
 
-                    if (imgToProcess == null)
+                    if (imgToProcess == null) {
+                        logger.warn("Image panel {} has no image, skipping.", i);
                         continue;
+                    }
+
+                    logger.info("Processing page {}/{} ({}x{})", i + 1, imagePanels.size(), imgToProcess.getWidth(),
+                            imgToProcess.getHeight());
 
                     // Process each page sequentially
-                    String response = client.recognizeHandwritingStreaming(imgToProcess, langCode, true,
+                    client.recognizeHandwritingStreaming(imgToProcess, langCode, true,
                             (page, index, total, text, bbox, base64Image, rejected, reason) -> {
                                 SwingUtilities.invokeLater(() -> {
                                     if (!rejected) {
@@ -416,21 +420,11 @@ public abstract class DocumentProcessorPanel extends JPanel {
                                 });
                             }).get();
 
-                    // Update full text from final response
-                    if (response != null) {
-                        try {
-                            ObjectMapper mapper = new ObjectMapper();
-                            JsonNode root = mapper.readTree(response);
-                            String pageText = root.path("text").asText("");
-                            fullText.append(pageText).append("\n");
-                        } catch (Exception e) {
-                            logger.warn("Failed to parse final OCR response", e);
-                        }
-                    }
+                    // Update full text from final response - REMOVED: Redundant and overwrites line
+                    // breaks
                 }
 
                 SwingUtilities.invokeLater(() -> {
-                    txtResult.setText(fullText.toString().trim());
                     imagePanels.forEach(p -> p.setHighlight(null));
                 });
 
