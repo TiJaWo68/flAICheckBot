@@ -180,6 +180,24 @@ public class MainApp {
 							AIEngineClient client = new AIEngineClient();
 							AIEngineClient.EngineStatus status = client.getStatus().get(); // Block briefly as we are in
 																							// background thread
+
+							// Version Check
+							final String REQUIRED_VERSION = "0.2.2";
+							boolean compatible = de.in.flaicheckbot.utils.BackendCompatibilityChecker
+									.isCompatible(REQUIRED_VERSION, status.version);
+
+							if (!compatible) {
+								String msg = "Inkompatible Backend-Version: " + status.version + " (Erwartet: "
+										+ REQUIRED_VERSION + ")";
+								LOGGER.error(msg);
+								SwingUtilities.invokeLater(() -> {
+									lblEngineStatus.setText(msg);
+									lblEngineStatus.setForeground(Color.RED);
+									// Disable start button essentially (it remains disabled)
+								});
+								return;
+							}
+
 							if (status != null && status.device != null) {
 								String deviceText = status.device;
 								if ("CUDA".equalsIgnoreCase(status.device)) {
@@ -200,7 +218,8 @@ public class MainApp {
 									deviceText = deviceText.substring(0, 37) + "...";
 								}
 
-								final String finalText = "KI-Engine: Bereit (" + deviceText + ")";
+								final String finalText = "KI-Engine: Bereit (" + deviceText + ", v" + status.version
+										+ ")";
 								final String iconName = status.deviceIcon;
 
 								SwingUtilities.invokeLater(() -> {
