@@ -1,11 +1,9 @@
+```python
 import cv2
 import numpy as np
 import os
 import sys
-
-# Add current directory to path so we can import icr_prototype
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import icr_prototype
+from app.preprocessing import is_noise_segment
 
 def test_image(img_path):
     img = cv2.imread(img_path)
@@ -16,8 +14,8 @@ def test_image(img_path):
     # Backend thresholding
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
-    # Analyze using the actual production function
-    result = icr_prototype.is_noise_segment(img, thresh)
+    # Call the noise filter directly from our new module
+    result = is_noise_segment(img, thresh)
     
     # Gather stats for debugging
     avg_brightness = np.mean(img)
