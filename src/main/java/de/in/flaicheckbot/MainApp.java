@@ -35,6 +35,7 @@ import de.in.flaicheckbot.db.DatabaseManager;
 import de.in.flaicheckbot.ui.EvaluationPanel;
 import de.in.flaicheckbot.ui.TestDefinitionPanel;
 import de.in.flaicheckbot.ui.TrainingPanel;
+import de.in.flaicheckbot.ui.AboutActionWrapper;
 import de.in.flaicheckbot.ui.DevPanel;
 import de.in.utils.Log4jTools;
 import de.in.utils.Version;
@@ -355,6 +356,33 @@ public class MainApp {
 			accountMenu.add(preferApiKeyItem);
 
 			menuBar.add(accountMenu);
+			menuBar.add(javax.swing.Box.createHorizontalGlue());
+
+			javax.swing.JMenu helpMenu = new javax.swing.JMenu("Hilfe");
+			javax.swing.JMenuItem instructionsItem = new javax.swing.JMenuItem("Anleitung");
+			instructionsItem.addActionListener(e -> {
+				javax.swing.JOptionPane.showMessageDialog(frame,
+						"<html><b>Anleitung flAICheckBot</b><br><br>"
+								+ "1. Starten Sie die Anwendung.<br>"
+								+ "2. Wählen Sie im Tab 'Training' Dokumente aus.<br>"
+								+ "3. Definieren Sie im Tab 'Test-Definition' Ihre Anforderungen.<br>"
+								+ "4. Bewerten Sie die Ergebnisse im Tab 'Bewertung'.<br><br>"
+								+ "Weitere Informationen finden Sie in der Dokumentation.</html>",
+						"Anleitung", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+			});
+			helpMenu.add(instructionsItem);
+
+			helpMenu.addSeparator();
+
+			AboutActionWrapper aboutAction = new AboutActionWrapper(frame, "TiJaWo68",
+					"https://github.com/TiJaWo68/flAICheckBot", "flAiCheckBot", 2025, GROUPID, ARTIFACTID,
+					frame.getIconImage());
+			javax.swing.JMenuItem aboutItem = new javax.swing.JMenuItem(aboutAction);
+			aboutItem.setText("Über flAiCheckBot");
+			helpMenu.add(aboutItem);
+
+			menuBar.add(helpMenu);
+
 			frame.setJMenuBar(menuBar);
 
 			frame.setVisible(true);
