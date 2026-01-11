@@ -28,6 +28,12 @@ from google import genai
 from google.genai import types
 from google.oauth2.credentials import Credentials
 
+print("\n" + "="*50)
+print("ICR PROTOTYPE BACKEND STARTING")
+print("NOISE REJECTION FILTERS: ACTIVE")
+print("DPI DEFAULT: 150")
+print("="*50 + "\n")
+
 DB_PATH = os.getenv("DB_PATH", "flaicheckbot.db")
 if not os.path.exists(DB_PATH):
     # Try project root if running from src/ai
@@ -62,9 +68,65 @@ except Exception as e:
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
+def get_device_info():
+    """Returns a dict with friendly device name and type."""
+    info = {
+        "type": "CPU",
+        "name": "Generic CPU",
+        "icon": "cpu"
+    }
+    
+    try:
+        if torch.cuda.is_available():
+            info["type"] = "CUDA"
+            info["name"] = torch.cuda.get_device_name(0)
+            info["icon"] = "cuda"
+        elif torch.backends.mps.is_available():
+             info["type"] = "MPS"
+             info["name"] = "Apple Silicon"
+             info["icon"] = "cpu" # or apple specific
+        else:
+            # CPU detection
+            import platform
+            proc_info = platform.processor()
+            if not proc_info:
+                 import subprocess
+                 # Linux fallback
+                 try:
+                     command = "cat /proc/cpuinfo"
+                     all_info = subprocess.check_output(command, shell=True).decode().strip()
+                     for line in all_info.split("\n"):
+                         if "model name" in line:
+                             proc_info = line.split(":")[1].strip()
+                             break
+                 except:
+                     pass
+            
+            info["name"] = proc_info if proc_info else "Standard CPU"
+            
+            # Icon heuristic
+            lower_name = info["name"].lower()
+            if "amd" in lower_name or "ryzen" in lower_name:
+                info["icon"] = "amd"
+            elif "intel" in lower_name or "core" in lower_name or "xeon" in lower_name:
+                info["icon"] = "intel"
+                
+    except Exception as e:
+        print(f"Error checking device info: {e}")
+        
+    return info
+
+@app.get("/ping")
 @app.get("/ping")
 async def ping():
-    return {"status": "ok", "model": vertex_model_name}
+    d_info = get_device_info()
+    return {
+        "status": "ok", 
+        "model": vertex_model_name,
+        "device": d_info["type"],
+        "deviceName": d_info["name"],
+        "deviceIcon": d_info["icon"]
+    }
 
 @app.get("/models")
 async def list_available_models(token: str = "", projectId: str = "", apiKey: str = ""):
@@ -248,6 +310,66 @@ def remove_ruling_lines(crop: np.ndarray) -> np.ndarray:
     result[mask > 0] = [255, 255, 255]
     return result
 
+def robust_horizontal_crop(roi_thresh: np.ndarray, breathing_room: int = 15) -> tuple[int, int]:
+    """
+    Finds the horizontal bounds of the main text block using projection,
+    ignoring isolated noise in the margins.
+    """
+    h, w = roi_thresh.shape
+    if w == 0:
+        return 0, 0
+    
+    # Calculate horizontal projection (average ink per column)
+    projection = np.sum(roi_thresh, axis=0) / 255
+    
+    # Aggressive threshold: demand at least 1.5 pixels average height
+    # to avoid marginal noise or ruling line remnants.
+    threshold = 1.5 
+    
+    valid_indices = np.where(projection > threshold)[0]
+    
+    if valid_indices.size == 0:
+        # Fallback to a less aggressive threshold if nothing found
+        valid_indices = np.where(projection > 0.5)[0]
+        if valid_indices.size == 0:
+            return 0, w
+        
+    start_x = max(0, int(valid_indices[0]) - breathing_room)
+    end_x = min(w, int(valid_indices[-1]) + breathing_room)
+    
+    return start_x, end_x
+
+def is_noise_segment(roi_color: np.ndarray, roi_thresh: np.ndarray) -> bool:
+    """
+    Advanced noise rejection based on user request and diagnostic analysis.
+    Returns True if the segment is likely noise/ruling-line/border.
+    """
+    if roi_color.size == 0:
+        return True
+    
+    # 1. Average Brightness Check (User request)
+    # Reject if it's nearly pure white (original image)
+    avg_brightness = np.mean(roi_color)
+    if avg_brightness > 248:
+        return True, f"Brightness ({avg_brightness:.1f})"
+        
+    # 2. Peak Row Density Check (Ruling line/Border filter)
+    # Real text is sparse. If a single row has > 80% ink density, it's an artifact.
+    h, w = roi_thresh.shape
+    if w > 0:
+        projection_v = np.sum(roi_thresh, axis=1) / (255 * w)
+        max_p = np.max(projection_v)
+        if max_p > 0.8:
+            return True, f"Peak Density ({max_p:.2f})"
+            
+    # 3. Standard Deviation Check (Variance filter)
+    # Empty regions have very low variance
+    v = np.std(roi_color)
+    if v < 2.0:
+        return True, f"Variance ({v:.2f} < 2.0)"
+    
+    return False, ""
+
 def split_lines_by_projection(roi_thresh: np.ndarray, roi_color: np.ndarray) -> list[Image.Image]:
     """Uses horizontal projection to split a block into individual lines precisely."""
     projection = np.sum(roi_thresh, axis=1)
@@ -283,19 +405,64 @@ def split_lines_by_projection(roi_thresh: np.ndarray, roi_color: np.ndarray) -> 
                 y_high = min(height, y + 2)
                 line_roi = roi_color[y_low:y_high, :]
                 
-                # Internal Density Check for the sub-segment
+                # Internal Density Check and Tight Cropping
                 sub_thresh = roi_thresh[y_low:y_high, :]
+                
+                # Find bounds of ink in this segment using horizontal projection
+                x_s, x_e = robust_horizontal_crop(sub_thresh, breathing_room=10)
+                
+                # Vertical check for ink
+                coords_y = np.where(np.any(sub_thresh[:, x_s:x_e] > 0, axis=1))[0]
+                if coords_y.size > 0:
+                    y_s_rel, y_e_rel = coords_y[0], coords_y[-1]
+                    y_s = max(0, y_low + y_s_rel - 2)
+                    y_e = min(height, y_low + y_e_rel + 2)
+                else:
+                    y_s, y_e = y_low, y_high
+
                 sub_density = cv2.countNonZero(sub_thresh) / (width * (y_high - y_low))
-                if sub_density > 0.015: # 1.5% ink minimum for a valid line
-                    img_line = Image.fromarray(cv2.cvtColor(line_roi, cv2.COLOR_BGR2RGB))
-                    lines.append((img_line, [0, y_low, width, y_high - y_low]))
+                
+                # Metadata for this segment
+                meta = {"density": sub_density, "rejected": False, "reason": ""}
+
+                if sub_density < 0.015:
+                    meta["rejected"] = True
+                    meta["reason"] = f"Density ({sub_density:.4f} < 0.015)"
+                else:
+                    # ADVANCED: User-requested noise rejection (Brightness, Peak Density, Variance)
+                    is_noise, reason = is_noise_segment(line_roi, sub_thresh)
+                    if is_noise:
+                        meta["rejected"] = True
+                        meta["reason"] = reason
+                        
+                line_roi_cropped = roi_color[y_s:y_e, x_s:x_e]
+                img_line = Image.fromarray(cv2.cvtColor(line_roi_cropped, cv2.COLOR_BGR2RGB))
+                # bbox: [x, y, width, height]
+                lines.append((img_line, [x_s, y_s, x_e - x_s, y_e - y_s], meta))
     
     # Handle trailing segment
     if in_line and height - start_y > 8:
-        line_roi = roi_color[start_y:, :]
-        img_line = Image.fromarray(cv2.cvtColor(line_roi, cv2.COLOR_BGR2RGB))
-        lines.append((img_line, [0, start_y, width, height - start_y]))
+        y_low = max(0, start_y - 2)
+        y_high = height
+        line_roi = roi_color[y_low:y_high, :]
+        sub_thresh = roi_thresh[y_low:y_high, :]
+        x_s, x_e = robust_horizontal_crop(sub_thresh, breathing_room=10)
         
+        sub_density = cv2.countNonZero(sub_thresh) / (width * (y_high - y_low))
+        meta = {"density": sub_density, "rejected": False, "reason": ""}
+        if sub_density < 0.015:
+            meta["rejected"] = True
+            meta["reason"] = f"Density ({sub_density:.4f})"
+        else:
+            is_noise, reason = is_noise_segment(line_roi, sub_thresh)
+            if is_noise:
+                meta["rejected"] = True
+                meta["reason"] = reason
+
+        line_roi_cropped = roi_color[y_low:y_high, x_s:x_e]
+        img_line = Image.fromarray(cv2.cvtColor(line_roi_cropped, cv2.COLOR_BGR2RGB))
+        lines.append((img_line, [x_s, y_low, x_e - x_s, y_high - y_low], meta))
+    
     return lines
 
 def segment_lines(img: np.ndarray) -> list[Image.Image]:
@@ -320,53 +487,74 @@ def segment_lines(img: np.ndarray) -> list[Image.Image]:
     vert_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, h_img // 15))
     vert_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, vert_kernel, iterations=1)
     
-    horiz_mask = cv2.dilate(horiz_lines, np.ones((5, 1), np.uint8), iterations=1)
-    vert_mask = cv2.dilate(vert_lines, np.ones((1, 5), np.uint8), iterations=1)
+    # 3. Clean threshold for text detection (remove lines but keep for guidance)
+    horiz_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (w_img // 15, 1))
+    horiz_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, horiz_kernel, iterations=1)
+    vert_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, h_img // 15))
+    vert_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, vert_kernel, iterations=1)
+    
+    # LESS aggressive dilation for line removal to preserve text
+    horiz_mask = cv2.dilate(horiz_lines, np.ones((2, 1), np.uint8), iterations=1)
+    vert_mask = cv2.dilate(vert_lines, np.ones((1, 2), np.uint8), iterations=1)
     thresh_clean = cv2.subtract(thresh, horiz_mask)
     thresh_clean = cv2.subtract(thresh_clean, vert_mask)
     
-    # 4. Use ruled lines as anchors if available
+    # 4. Use ruled lines as anchors if available (require at least 3 to trust them)
     line_images = []
-    if len(ruled_y) >= 2:
-        # Calculate median distance
+    if len(ruled_y) >= 3:
+        # Calculate median distance if possible
         distances = [ruled_y[i] - ruled_y[i-1] for i in range(1, len(ruled_y))]
         median_dist = int(np.median(distances))
-        padding = int(median_dist * 0.25)
-        print(f"Median line distance: {median_dist}px, Applying padding: {padding}px")
+            
+        padding_above = int(median_dist * 0.8) # Slightly more top padding
+        padding_below = int(median_dist * 0.2) # Less bottom padding to avoid next line
+        print(f"Median line distance: {median_dist}px, Above: {padding_above}px, Below: {padding_below}px")
         
-        # Add a synthetic line before the first one if there's space for a header
-        # Fix: User says we lose the 1st line. If ruled_y[0] is not at the very top, 
-        # always add a virtual line at the top to check for headers.
-        if ruled_y[0] > 10:
-            ruled_y.insert(0, 5) # Potential line at the very top
+        for i, y_anchor in enumerate(ruled_y):
+            y_low = max(0, y_anchor - padding_above)
+            y_high = min(h_img, y_anchor + padding_below)
             
-        # Add a synthetic line after the last one
-        if h_img - ruled_y[-1] > median_dist:
-            ruled_y.append(ruled_y[-1] + median_dist)
-            
-        for i in range(len(ruled_y) - 1):
-            y_start = ruled_y[i]
-            y_end = ruled_y[i+1]
-            
-            # Extract bucket
-            # IMPORTANT: Iteration 5: User wants 0% top, 25% bottom padding
-            y_low = y_start
-            y_high = min(h_img, y_end + padding)
-            
-            # Check if this bucket contains text
+            # Increase threshold to avoid empty lines with marginal noise/ruling remnants
             roi_thresh = thresh_clean[y_low:y_high, :]
-            density = cv2.countNonZero(roi_thresh) / (w_img * (y_high - y_low))
+            density = np.count_nonzero(roi_thresh) / roi_thresh.size if roi_thresh.size > 0 else 0
             
-            if density > 0.01: # 1% ink to be considered a line
-                # Crop and apply line removal + Schwarzmaske
+            meta = {"density": density, "rejected": False, "reason": ""}
+            if density <= 0.008: 
+                meta["rejected"] = True
+                meta["reason"] = f"Density ({density:.4f} < 0.008)"
+            else:
                 roi_color = img[y_low:y_high, :]
-                clean_roi = remove_ruling_lines(roi_color)
-                masked_roi = apply_schwarzmaske(clean_roi, padding_bottom=padding)
-                img_line = Image.fromarray(cv2.cvtColor(masked_roi, cv2.COLOR_BGR2RGB))
-                line_images.append((img_line, [0, y_low, w_img, y_high - y_low]))
+                is_noise, reason = is_noise_segment(roi_color, roi_thresh)
+                if is_noise:
+                    meta["rejected"] = True
+                    meta["reason"] = reason
+
+            # We now keep the segment even if rejected, so it can be shown in UI
+            roi_color = img[y_low:y_high, :]
+            
+            # NEW: Tight Cropping based on ink projection
+            # 1. Horizontal
+            x_start, x_end = robust_horizontal_crop(roi_thresh, breathing_room=15)
+            
+            # 2. Vertical Refining
+            coords_y = np.where(np.any(roi_thresh[:, x_start:x_end] > 0, axis=1))[0]
+            if coords_y.size > 0:
+                y_start = max(0, y_low + coords_y[0] - 5)
+                y_end = min(h_img, y_low + coords_y[-1] + 5)
+            else:
+                y_start, y_end = y_low, y_high
+
+            roi_color_cropped = img[y_start:y_end, x_start:x_end]
+            clean_roi = remove_ruling_lines(roi_color_cropped)
+            masked_roi = apply_schwarzmaske(clean_roi, padding_bottom=max(0, y_high - y_end))
+            img_line = Image.fromarray(cv2.cvtColor(masked_roi, cv2.COLOR_BGR2RGB))
+            
+            # bbox: [x, y, width, height]
+            line_images.append((img_line, [x_start, y_start, x_end - x_start, y_end - y_start], meta))
     else:
-        # FALLBACK: Use projection logic if no ruled lines found (e.g. plain paper)
-        print("No ruled lines found. Falling back to projection segmentation.")
+        # FALLBACK: Use projection logic if no/few ruled lines found
+        print(f"Ruled lines ({len(ruled_y)}) insufficient. Using projection segmentation.")
+        # Projection logic here... (keep existing)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 2))
         dilated = cv2.dilate(thresh_clean, kernel, iterations=1)
         contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -384,30 +572,43 @@ def segment_lines(img: np.ndarray) -> list[Image.Image]:
                 s_bbox[1] += y_c
                 line_images.append((s_img, s_bbox))
             
-    print(f"Line-Guided Segmentation: result has {len(line_images)} lines.")
+    if not line_images:
+        print(f"Line-Guided Segmentation: result is EMPTY (all filtered as noise or density too low).")
+    else:
+        print(f"Line-Guided Segmentation: result has {len(line_images)} lines.")
     return line_images
 
 def pad_image(image: Image.Image, target_size=(384, 384)) -> Image.Image:
     """
-    Pads the image to be square (or target aspect ratio) without distorting it.
+    Pads the image to a target aspect ratio (e.g. 4:1) before resizing to square,
+    to reduce extreme vertical stretching.
     """
-    # Create a white background
-    white_bg = Image.new("RGB", target_size, (255, 255, 255))
-    
-    # Calculate aspect ratios
+    # Move to RGB if needed
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+        
     orig_w, orig_h = image.size
-    ratio = min(target_size[0] / orig_w, target_size[1] / orig_h)
     
-    # Resize keeping aspect ratio
-    new_w = int(orig_w * ratio)
-    new_h = int(orig_h * ratio)
-    resized_img = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    # Target aspect ratio 4:1 (common for handwriting lines)
+    target_ratio = 4.0
+    current_ratio = orig_w / orig_h
     
-    # Center the image
-    offset = ((target_size[0] - new_w) // 2, (target_size[1] - new_h) // 2)
-    white_bg.paste(resized_img, offset)
-    
-    return white_bg
+    if current_ratio > target_ratio:
+        # Too wide: pad vertically to reach 4:1
+        new_h = int(orig_w / target_ratio)
+        new_image = Image.new("RGB", (orig_w, new_h), (255, 255, 255))
+        offset = (0, (new_h - orig_h) // 2)
+        new_image.paste(image, offset)
+        image = new_image
+    elif current_ratio < 0.5:
+        # Too tall: pad horizontally
+        new_w = int(orig_h * 0.5)
+        new_image = Image.new("RGB", (new_w, orig_h), (255, 255, 255))
+        offset = ((new_w - orig_w) // 2, 0)
+        new_image.paste(image, offset)
+        image = new_image
+
+    return image
 
 import io
 
@@ -470,18 +671,34 @@ def is_garbage(text: str) -> bool:
     if not txt:
         return True
     
+    # 0. Allow common list markers (don't filter these as garbage)
+    # e.g. "1)", "a.", "2.", "(1)"
+    if re.match(r'^[\(]?[0-9a-zA-Z]{1,2}[\.\)]\s*$', txt):
+        return False
+
     # 1. Repetitive nonsense numbers like "0 0", "1 1 1", "0 0 0 0"
     if re.match(r'^[\s01.-]+$', txt):
         if len(txt) < 8: # Keep slightly longer numeric sequences if they might be dates
-            return True
+             # Avoid killing single '1' if it could be a marker, but '0' or '0.0' is usually noise
+             if txt.strip() in ("0", "0.", "0.0", "-"):
+                 return True
+             if len(txt.strip()) > 3: # repetitive noise like "0 0 0"
+                 return True
             
-    # 2. Common ruled-line hallucinations
-    if "1961 62" in txt and len(txt) < 12:
-        return True
+    # 2. (Removed) Common ruled-line/Wikipedia/Government hallucinations are no longer filtered by keyword
+    # to avoid false positives on valid text about these topics.
     
-    # 3. Long sequences of meaningless digits/symbols
+    # 3. Long sequences of meaningless digits/symbols or excessive repetition
     if re.search(r'000\d{5,}', txt) or "0000" in txt:
         return True
+    
+    # 4. Excessive repetition of same char sequences
+    words = txt.split()
+    if len(words) > 5:
+        from collections import Counter
+        counts = Counter(words)
+        if any(count > 3 for count in counts.values()) and len(counts) < len(words) / 2:
+            return True
         
     return False
 
@@ -501,8 +718,8 @@ async def recognize(file: UploadFile = File(...), language: str = Form("de"), pr
         if is_pdf:
             print(f"PDF detected: {file.filename}. Converting to images...")
             try:
-                # Convert PDF to images
-                images = convert_from_bytes(content)
+                # Convert PDF to images at 150 DPI to match Java UI and optimal OCR quality
+                images = convert_from_bytes(content, dpi=150) 
                 for img in images:
                     # convert PIL to OpenCV
                     open_cv_image = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
@@ -542,72 +759,106 @@ async def recognize(file: UploadFile = File(...), language: str = Form("de"), pr
                     print(f"Page {page_idx+1}/{page_total}: Preprocessing disabled: processing whole image.")
 
                 if not line_results:
-                    # Fallback for single line/small area
-                    line_results = [(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)), [0, 0, img.shape[1], img.shape[0]])]
+                    print(f"Page {page_idx+1}/{page_total}: No text/lines detected (after segmentation and noise rejection).")
+                    continue
 
                 total_lines_on_page = len(line_results)
-                for i, (line_img, bbox) in enumerate(line_results):
+                for i, (line_img, bbox, meta) in enumerate(line_results):
                     # Convert to numpy
                     img_np = cv2.cvtColor(np.array(line_img), cv2.COLOR_RGB2BGR)
+
+                    # 1. Check if already rejected by segmentation (noise)
+                    is_rejected = meta.get("rejected", False)
+                    rejection_reason = meta.get("reason", "")
                     
-                    # Preprocessing: Deskew only. 
-                    processed_img_np = deskew(img_np)
-                    processed_image = Image.fromarray(cv2.cvtColor(processed_img_np, cv2.COLOR_BGR2RGB))
-                    
-                    # 3. Process
-                    pixel_values = active_processor(images=processed_image, return_tensors="pt").pixel_values.to(device)
-                    
-                    with torch.no_grad():
-                        outputs = current_model.generate(
-                            pixel_values=pixel_values,
-                            output_scores=True,
-                            return_dict_in_generate=True,
-                            num_beams=4,
-                            length_penalty=2.0,
-                            early_stopping=True,
-                            repetition_penalty=1.2
-                        )
-                    
-                    generated_ids = outputs.sequences
-                    line_text = active_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-                    
-                    # Confidence filtering
-                    avg_prob = 1.0 
-                    try:
-                        beam_indices = outputs.beam_indices if hasattr(outputs, "beam_indices") else None
-                        transition_scores = current_model.compute_transition_scores(
-                            outputs.sequences, 
-                            outputs.scores, 
-                            beam_indices=beam_indices,
-                            normalize_logits=True
-                        )
-                        avg_prob = torch.exp(transition_scores).mean().item()
-                    except Exception as e:
-                        avg_prob = 1.0 
-                    
-                    # Pattern rejection
-                    if line_text:
-                        if is_garbage(line_text):
-                            print(f"Filtering garbage pattern: '{line_text}'")
-                            continue
+                    line_text = ""
+                    avg_prob = 1.0
+                    ink_density = meta.get("density", 0.0)
+
+                    if not is_rejected:
+                        # Preprocessing: Denoising and Deskewing. 
+                        processed_img_np = advanced_preprocess(img_np)
+                        processed_image = Image.fromarray(cv2.cvtColor(processed_img_np, cv2.COLOR_BGR2RGB))
                         
-                        threshold = 0.35 if len(line_text) > 15 else 0.5
-                        if avg_prob < threshold:
-                            print(f"Skipping low confidence line ({avg_prob:.2f}): '{line_text}'")
-                            continue
+                        # 3. Process
+                        pixel_values = active_processor(images=processed_image, return_tensors="pt").pixel_values.to(device)
+                        
+                        with torch.no_grad():
+                            outputs = current_model.generate(
+                                pixel_values=pixel_values,
+                                output_scores=True,
+                                return_dict_in_generate=True,
+                                num_beams=4,
+                                length_penalty=1.0,
+                                early_stopping=True,
+                                repetition_penalty=1.2
+                            )
+                        
+                        generated_ids = outputs.sequences
+                        line_text = active_processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+                        
+                        # Confidence filtering
+                        try:
+                            beam_indices = outputs.beam_indices if hasattr(outputs, "beam_indices") else None
+                            transition_scores = current_model.compute_transition_scores(
+                                outputs.sequences, 
+                                outputs.scores, 
+                                beam_indices=beam_indices,
+                                normalize_logits=True
+                            )
+                            avg_prob = torch.exp(transition_scores).mean().item()
+                        except Exception:
+                            avg_prob = 1.0 
+                        
+                        # Garbage check
+                        if line_text:
+                            if is_garbage(line_text):
+                                is_rejected = True
+                                rejection_reason = "Garbage/Hallucination"
                             
+                            # Confidence threshold
+                            threshold = 0.35 if len(line_text) > 15 else 0.5
+                            if re.match(r'^[\(]?[0-9a-zA-Z]{1,2}[\.\)]\s*$', line_text):
+                                threshold = 0.2
+                            
+                            if avg_prob < threshold and not is_rejected:
+                                is_rejected = True
+                                rejection_reason = f"Low Confidence ({avg_prob:.2f} < {threshold})"
+                                
+                            # Sparse density check
+                            if len(line_text) > 20 and ink_density < 0.005 and not is_rejected:
+                                is_rejected = True
+                                rejection_reason = "Sparse/Hallucination"
+
+                    log_msg = f"Candidate: '{line_text[:30]}...' (len: {len(line_text)}, conf: {avg_prob:.3f}, dens: {ink_density:.4f})"
+                    if is_rejected:
+                        print(f"{log_msg} -> REJECTED: {rejection_reason}")
+                    else:
+                        print(f"{log_msg} -> ACCEPTED")
                         all_results.append(line_text)
-                        
-                        # Yield progress update
-                        yield json.dumps({
-                            "type": "line",
-                            "index": i,
-                            "total": total_lines_on_page,
-                            "page": page_idx,
-                            "page_total": page_total,
-                            "text": line_text,
-                            "bbox": bbox
-                        }) + "\n"
+                    
+                    # Base64 for debugging
+                    import io
+                    import base64
+                    buffered = io.BytesIO()
+                    line_img.save(buffered, format="PNG")
+                    img_base64 = base64.b64encode(buffered.getvalue()).decode()
+                    
+                    final_bbox = [int(coord) for coord in bbox]
+
+                    # Yield progress update with rejection info
+                    yield json.dumps({
+                        "type": "line",
+                        "index": i,
+                        "total": total_lines_on_page,
+                        "page": page_idx,
+                        "page_total": page_total,
+                        "text": line_text,
+                        "bbox": final_bbox,
+                        "image": img_base64,
+                        "rejected": is_rejected,
+                        "reason": rejection_reason
+                    }) + "\n"
             
             # Yield final result
             final_text = "\n".join(all_results)
