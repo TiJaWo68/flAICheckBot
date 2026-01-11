@@ -189,7 +189,12 @@ public class AIEngineClient {
                     }
                 }
 
-                return finalResult.toString();
+                String resultString = finalResult.toString();
+                if (resultString.trim().isEmpty()) {
+                    throw new RuntimeException(
+                            "AI Engine returned empty response (Stream ended correctly but sent no data). Check server logs.");
+                }
+                return resultString;
             } catch (IOException | InterruptedException e) {
                 logger.error("Failed to communicate with AI Engine", e);
                 throw new RuntimeException(e);
@@ -412,6 +417,7 @@ public class AIEngineClient {
         public String device;
         public String deviceName;
         public String deviceIcon;
+        public String version;
     }
 
     public java.util.concurrent.CompletableFuture<EngineStatus> getStatus() {
