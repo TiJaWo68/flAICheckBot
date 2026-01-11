@@ -7,6 +7,8 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Image;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -26,6 +28,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.formdev.flatlaf.FlatDarculaLaf;
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 
 import de.in.flaicheckbot.ai.AiProcessManager;
 import de.in.flaicheckbot.db.DatabaseManager;
@@ -51,6 +54,15 @@ public class MainApp {
 	private static String projectId;
 	private static String geminiApiKey;
 	private static boolean preferApiKey = true; // Default to true for ease of use
+
+	private static final String SETTING_WINDOW_X = "window_x";
+	private static final String SETTING_WINDOW_Y = "window_y";
+	private static final String SETTING_WINDOW_WIDTH = "window_width";
+	private static final String SETTING_WINDOW_HEIGHT = "window_height";
+	private static final String SETTING_WINDOW_MAXIMIZED = "window_maximized";
+	private static final boolean IS_LINUX = System.getProperty("os.name").toLowerCase().contains("linux");
+
+	private static boolean windowStateLoaded = false;
 
 	public static class AuthStatus {
 		public final boolean oauthLoggedIn;
@@ -163,8 +175,64 @@ public class MainApp {
 				boolean ready = aiManager.waitForEngine(60);
 				SwingUtilities.invokeLater(() -> {
 					if (ready) {
-						lblEngineStatus.setText("KI-Engine: Bereit ✅");
-						lblEngineStatus.setForeground(new Color(0, 150, 0));
+						// Fetch detailed status (device info)
+						try {
+							AIEngineClient client = new AIEngineClient();
+							AIEngineClient.EngineStatus status = client.getStatus().get(); // Block briefly as we are in
+																							// background thread
+							if (status != null && status.device != null) {
+								String deviceText = status.device;
+								if ("CUDA".equalsIgnoreCase(status.device)) {
+									deviceText = "Powered by CUDA";
+								} else if ("MPS".equalsIgnoreCase(status.device)) {
+									deviceText = "Powered by Apple Silicon";
+								} else {
+									// For CPU, maybe show the model or brand
+									if (status.deviceName != null && !status.deviceName.isEmpty()) {
+										deviceText = status.deviceName;
+									} else {
+										deviceText = "Powered by CPU";
+									}
+								}
+
+								// Truncate if too long
+								if (deviceText.length() > 40) {
+									deviceText = deviceText.substring(0, 37) + "...";
+								}
+
+								final String finalText = "KI-Engine: Bereit (" + deviceText + ")";
+								final String iconName = status.deviceIcon;
+
+								SwingUtilities.invokeLater(() -> {
+									lblEngineStatus.setText(finalText);
+									lblEngineStatus.setForeground(new Color(0, 150, 0));
+
+									// Try to load icon
+									if (iconName != null) {
+										try {
+											// Load SVG icon (16x16)
+											lblEngineStatus.setIcon(
+													new FlatSVGIcon("images/icon_" + iconName + ".svg", 16, 16));
+											lblEngineStatus.setHorizontalTextPosition(SwingConstants.LEFT);
+											lblEngineStatus.setIconTextGap(8);
+										} catch (Exception ex) {
+											LOGGER.warn("Could not load device icon: " + iconName, ex);
+										}
+									}
+								});
+							} else {
+								SwingUtilities.invokeLater(() -> {
+									lblEngineStatus.setText("KI-Engine: Bereit ✅");
+									lblEngineStatus.setForeground(new Color(0, 150, 0));
+								});
+							}
+						} catch (Exception ex) {
+							LOGGER.warn("Failed to fetch detailed status", ex);
+							SwingUtilities.invokeLater(() -> {
+								lblEngineStatus.setText("KI-Engine: Bereit ✅");
+								lblEngineStatus.setForeground(new Color(0, 150, 0));
+							});
+						}
 					} else {
 						lblEngineStatus.setText("KI-Engine: Fehler beim Start ❌");
 						lblEngineStatus.setForeground(Color.RED);
@@ -226,7 +294,8 @@ public class MainApp {
 			frame.add(lblEngineStatus, BorderLayout.SOUTH);
 
 			// Centralized Menu Bar and Title Bar Integration
-			frame.getRootPane().putClientProperty("flatlaf.menuBarEmbedded", true);
+			// Only disable on Linux to fix multi-monitor clamping
+			frame.getRootPane().putClientProperty("flatlaf.menuBarEmbedded", !IS_LINUX);
 			javax.swing.JMenuBar menuBar = new javax.swing.JMenuBar();
 			javax.swing.JMenu accountMenu = new javax.swing.JMenu("Account");
 			javax.swing.JMenuItem loginItem = new javax.swing.JMenuItem("Google Login (OAuth)...");
@@ -264,6 +333,14 @@ public class MainApp {
 			// Handle DB and AI completion to setup WorkflowUI
 			CompletableFuture.allOf(dbFuture, setupFuture).thenAcceptAsync(v -> {
 				DatabaseManager dbManager = dbFuture.join();
+
+				// Save window state on close
+				frame.addWindowListener(new WindowAdapter() {
+					@Override
+					public void windowClosing(WindowEvent e) {
+						saveWindowState(frame, dbManager, welcomePanel);
+					}
+				});
 
 				// Load Gemini API Key from DB
 				try {
@@ -313,8 +390,11 @@ public class MainApp {
 					btnStart.addActionListener(e -> {
 						CardLayout cl = (CardLayout) mainPanel.getLayout();
 						cl.show(mainPanel, "app");
-						frame.setSize(1080, 800);
-						frame.setLocationRelativeTo(null);
+						loadWindowState(frame, dbManager);
+						if (!windowStateLoaded) {
+							frame.setSize(1080, 800);
+							frame.setLocationRelativeTo(null);
+						}
 					});
 				});
 			}).exceptionally(ex -> {
@@ -366,6 +446,84 @@ public class MainApp {
 				LOGGER.error("Failed to save API Key", e);
 				de.in.utils.gui.ExceptionMessage.show(parent, "Fehler", "Speichern fehlgeschlagen", e);
 			}
+		}
+	}
+
+	private static void loadWindowState(JFrame frame, DatabaseManager dbManager) {
+		try {
+			String xStr = dbManager.getSetting(SETTING_WINDOW_X);
+			String yStr = dbManager.getSetting(SETTING_WINDOW_Y);
+			String wStr = dbManager.getSetting(SETTING_WINDOW_WIDTH);
+			String hStr = dbManager.getSetting(SETTING_WINDOW_HEIGHT);
+			String maxStr = dbManager.getSetting(SETTING_WINDOW_MAXIMIZED);
+
+			if (xStr != null && yStr != null && wStr != null && hStr != null) {
+				int x = Integer.parseInt(xStr);
+				int y = Integer.parseInt(yStr);
+				int w = Integer.parseInt(wStr);
+				int h = Integer.parseInt(hStr);
+				LOGGER.info("Restoring window bounds: x={}, y={}, w={}, h={}, max={}", x, y, w, h, maxStr);
+
+				// Use invokeLater to ensure this happens after the current layout cycle
+				SwingUtilities.invokeLater(() -> {
+					Dimension oldMin = frame.getMinimumSize();
+
+					if (IS_LINUX) {
+						// Aggressive restoration for Linux: temporarily set minimum size to allow large
+						// bounds
+						frame.setMinimumSize(new Dimension(w, h));
+					}
+
+					frame.setBounds(x, y, w, h);
+
+					if (Boolean.parseBoolean(maxStr)) {
+						frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+					}
+
+					frame.revalidate();
+					frame.repaint();
+
+					if (IS_LINUX) {
+						// Revert minimum size after a short delay on Linux
+						javax.swing.Timer timer = new javax.swing.Timer(500, ev -> {
+							frame.setMinimumSize(oldMin);
+						});
+						timer.setRepeats(false);
+						timer.start();
+					}
+				});
+				windowStateLoaded = true;
+			} else {
+				LOGGER.info("No saved window state found in database.");
+			}
+		} catch (Exception e) {
+			LOGGER.warn("Failed to load window state", e);
+		}
+	}
+
+	private static void saveWindowState(JFrame frame, DatabaseManager dbManager, JPanel welcomePanel) {
+		if (welcomePanel.isVisible()) {
+			LOGGER.info("Not saving window state because Welcome Screen is active.");
+			return;
+		}
+		try {
+			boolean maximized = (frame.getExtendedState() & JFrame.MAXIMIZED_BOTH) != 0;
+			dbManager.setSetting(SETTING_WINDOW_MAXIMIZED, String.valueOf(maximized));
+
+			// Always save bounds, even if maximized (though they might be the maximized
+			// bounds)
+			int x = frame.getX();
+			int y = frame.getY();
+			int w = frame.getWidth();
+			int h = frame.getHeight();
+			LOGGER.info("Saving window state: x={}, y={}, w={}, h={}, maximized={}", x, y, w, h, maximized);
+
+			dbManager.setSetting(SETTING_WINDOW_X, String.valueOf(x));
+			dbManager.setSetting(SETTING_WINDOW_Y, String.valueOf(y));
+			dbManager.setSetting(SETTING_WINDOW_WIDTH, String.valueOf(w));
+			dbManager.setSetting(SETTING_WINDOW_HEIGHT, String.valueOf(h));
+		} catch (Exception e) {
+			LOGGER.error("Failed to save window state", e);
 		}
 	}
 
