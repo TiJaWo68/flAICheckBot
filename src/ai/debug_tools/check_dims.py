@@ -4,14 +4,13 @@ import sys
 import cv2
 import numpy as np
 
-sys.path.append("/home/t68/eclipse-workspace/flAICheckBot/src/ai")
-import icr_prototype
+from app.preprocessing import segment_lines
 
 def check_dims():
     img_path = "/home/t68/eclipse-workspace/flAICheckBot/exported_samples/en/sample_20.png"
     img = cv2.imread(img_path)
     
-    lines = icr_prototype.segment_lines(img)
+    lines = segment_lines(img)
     print(f"Detected {len(lines)} lines.\n")
     
     print("--- Dimensions of first 5 lines ---")
