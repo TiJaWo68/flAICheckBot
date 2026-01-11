@@ -68,11 +68,11 @@ def run_ocr(img_np):
     # For simplicity in evaluation, we'll assume we want to see the whole page or 
     # we'll use the backend's segment_lines if possible.
     
-    from icr_prototype import segment_lines, advanced_preprocess
+    from app.preprocessing import segment_lines, advanced_preprocess
     
     results = []
     line_results = segment_lines(img_np)
-    for line_img, bbox in line_results:
+    for line_img, bbox, _ in line_results:
         line_np = cv2.cvtColor(np.array(line_img), cv2.COLOR_RGB2BGR)
         processed_img_np = advanced_preprocess(line_np)
         processed_image = Image.fromarray(cv2.cvtColor(processed_img_np, cv2.COLOR_BGR2RGB))
