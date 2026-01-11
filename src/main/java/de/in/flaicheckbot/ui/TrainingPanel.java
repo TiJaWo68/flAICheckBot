@@ -1,10 +1,9 @@
 package de.in.flaicheckbot.ui;
 
 import java.awt.FlowLayout;
-import java.awt.image.BufferedImage;
 import java.io.File;
 
-import javax.imageio.ImageIO;
+import java.util.List;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -202,27 +201,60 @@ public class TrainingPanel extends DocumentProcessorPanel {
 	}
 
 	private void saveToDatabase() {
-		if (currentFile == null && currentRawData == null || txtResult.getText().trim().isEmpty()
-				|| imagePanels.isEmpty()) {
+		if (currentFile == null && currentRawData == null || imagePanels.isEmpty()) {
 			return;
 		}
+
 		String language = (String) comboLanguage.getSelectedItem();
 		String langCode = LanguageSelectionProvider.mapToIsoCode(language);
-		String text = txtResult.getText();
-		String fileName = currentFile != null ? currentFile.getName() : "unbenannt";
 
-		try {
-			int setId = dbManager.createTrainingSet(fileName, text, langCode);
-			for (ZoomableImagePanel p : imagePanels) {
-				BufferedImage usedImage = p.getImage();
-				java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-				ImageIO.write(usedImage, "png", baos);
-				dbManager.addTrainingSample(setId, baos.toByteArray(), "image/png", text);
+		if (!recognitionSegments.isEmpty()) {
+			// Already have segments from a previous local recognition
+			openSelectionDialog(recognitionSegments, txtResult.getText());
+		} else {
+			// Need to start segmentation
+			TrainingDataSelectionDialog dialog = new TrainingDataSelectionDialog(this, null, txtResult.getText());
+
+			// Run recognition in background (silent) and feed the dialog
+			runLocalRecognition(langCode, true, dialog::addSegment).thenRun(() -> {
+				dialog.setSegmentationFinished();
+			});
+
+			dialog.setVisible(true);
+			processDialogResult(dialog);
+		}
+	}
+
+	private void openSelectionDialog(List<RecognitionSegment> segments, String currentText) {
+		TrainingDataSelectionDialog dialog = new TrainingDataSelectionDialog(this, segments, currentText);
+		dialog.setVisible(true);
+		processDialogResult(dialog);
+	}
+
+	private void processDialogResult(TrainingDataSelectionDialog dialog) {
+		if (dialog.isConfirmed()) {
+			List<RecognitionSegment> toSave = dialog.getFinalSegments();
+			if (toSave.isEmpty()) {
+				JOptionPane.showMessageDialog(this, "Keine Segmente zum Speichern ausgewählt.");
+				return;
 			}
-			JOptionPane.showMessageDialog(this, "Gespeichert unter Set ID " + setId);
-		} catch (Exception e) {
-			logger.error("Save failed", e);
-			ExceptionMessage.show(this, "Fehler", "Speichern fehlgeschlagen", e);
+
+			String language = (String) comboLanguage.getSelectedItem();
+			String langCode = LanguageSelectionProvider.mapToIsoCode(language);
+			String fileName = currentFile != null ? currentFile.getName() : "unbenannt";
+
+			try {
+				int setId = dbManager.createTrainingSet(fileName, txtResult.getText(), langCode);
+				for (RecognitionSegment seg : toSave) {
+					byte[] bytes = java.util.Base64.getDecoder().decode(seg.base64Image);
+					dbManager.addTrainingSample(setId, bytes, "image/png", seg.text);
+				}
+				JOptionPane.showMessageDialog(this,
+						"Erfolgreich " + toSave.size() + " Segmente gespeichert unter Set ID " + setId);
+			} catch (Exception e) {
+				logger.error("Save failed", e);
+				ExceptionMessage.show(this, "Fehler", "Speichern fehlgeschlagen", e);
+			}
 		}
 	}
 }
