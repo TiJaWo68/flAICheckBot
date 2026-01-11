@@ -5,7 +5,7 @@
 
 	<groupId>de.in.flaicheckbot</groupId>
 	<artifactId>flAICheckBot</artifactId>
-	<version>0.4.0</version>
+	<version>0.4.1</version>
 
 	<properties>
 		<maven.compiler.source>21</maven.compiler.source>
