@@ -67,9 +67,12 @@ public class AiEngineIntegrationTest {
         final int[] lineCount = { 0 };
         try {
             CompletableFuture<String> future = client.recognizeHandwritingStreaming(tempFile, "en", true,
-                    (page, index, total, text, bbox) -> {
+                    (page, index, total, text, bbox, image, rejected, reason) -> {
                         lineCount[0]++;
-                        logger.info("Stream Item: Page {}, {}/{} - {} (BBox: {})", page, index, total, text, bbox);
+                        logger.info(
+                                "Stream Item: Page {}, {}/{} - {} (Rejected: {}, Reason: {}, BBox: {}, ImageLen: {})",
+                                page, index, total, text, rejected, reason, bbox,
+                                (image != null ? image.length() : "null"));
                     });
 
             String result = future.get(30, java.util.concurrent.TimeUnit.SECONDS);
