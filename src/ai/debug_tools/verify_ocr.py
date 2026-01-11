@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-import icr_prototype
+from app.preprocessing import segment_lines
 import os
 import shutil
 
@@ -26,7 +26,7 @@ def test_on_user_image(image_path, output_dir="debug_lines"):
         return "Image not found"
         
     print("Segmenting lines...")
-    line_images = icr_prototype.segment_lines(img)
+    line_images = segment_lines(img)
     print(f"Detected {len(line_images)} lines.")
     
     results = []
