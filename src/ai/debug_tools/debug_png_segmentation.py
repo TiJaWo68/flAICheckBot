@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import os
 from PIL import Image
-from icr_prototype import segment_lines, deskew
+from app.preprocessing import segment_lines, deskew
 
 # Paths
 base_dir = "/home/t68/eclipse-workspace/flAICheckBot/src/test/resources/local-test-data"
