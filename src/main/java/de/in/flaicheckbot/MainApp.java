@@ -35,6 +35,7 @@ import de.in.flaicheckbot.db.DatabaseManager;
 import de.in.flaicheckbot.ui.EvaluationPanel;
 import de.in.flaicheckbot.ui.TestDefinitionPanel;
 import de.in.flaicheckbot.ui.TrainingPanel;
+import de.in.flaicheckbot.ui.DevPanel;
 import de.in.utils.Log4jTools;
 import de.in.utils.Version;
 
@@ -140,13 +141,22 @@ public class MainApp {
 
 		// Parse command line arguments
 		String authArg = null;
+		boolean devMode = false;
+		String devFile = null;
 		for (String arg : args) {
 			if (arg.startsWith("--auth=")) {
 				authArg = arg.substring("--auth=".length());
+			} else if (arg.equals("--dev")) {
+				devMode = true;
+			} else if (arg.startsWith("--dev=")) {
+				devMode = true;
+				devFile = arg.substring("--dev=".length());
 			}
 		}
 
 		final String finalAuthArg = authArg;
+		final boolean finalDevMode = devMode;
+		final String finalDevFile = devFile;
 
 		// UI State Components
 		final JLabel lblEngineStatus = new JLabel("KI-Engine: Startet...", SwingConstants.RIGHT);
@@ -391,6 +401,13 @@ public class MainApp {
 				SwingUtilities.invokeLater(() -> {
 					LOGGER.info("Core systems ready, initializing UI components...");
 					JTabbedPane tabbedPane = new JTabbedPane();
+					if (finalDevMode) {
+						DevPanel devPanel = new DevPanel(dbManager);
+						tabbedPane.addTab("Dev", devPanel);
+						if (finalDevFile != null) {
+							devPanel.loadImage(new java.io.File(finalDevFile));
+						}
+					}
 					tabbedPane.addTab("Training", new TrainingPanel(dbManager));
 					tabbedPane.addTab("Test-Definition", new TestDefinitionPanel(dbManager));
 					tabbedPane.addTab("Bewertung", new EvaluationPanel(dbManager));
