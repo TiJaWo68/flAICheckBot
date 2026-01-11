@@ -57,6 +57,7 @@ public abstract class DocumentProcessorPanel extends JPanel {
     protected List<ZoomableImagePanel> imagePanels = new ArrayList<>();
     protected File currentFile;
     protected byte[] currentRawData;
+    protected boolean showDebugSegments = false;
 
     public DocumentProcessorPanel(DatabaseManager dbManager) {
         this.dbManager = dbManager;
@@ -99,17 +100,21 @@ public abstract class DocumentProcessorPanel extends JPanel {
 
         rightPanel.add(new JScrollPane(txtResult), BorderLayout.CENTER);
 
-        // Right Most: Segments (Visual Debug)
-        JPanel debugPanel = new JPanel(new BorderLayout());
-        debugPanel.setBorder(BorderFactory.createTitledBorder("Zeilen-Segmente (Debug)"));
-        segmentsPanel = new JPanel();
-        segmentsPanel.setLayout(new BoxLayout(segmentsPanel, BoxLayout.Y_AXIS));
-        debugPanel.add(new JScrollPane(segmentsPanel), BorderLayout.CENTER);
+        if (showDebugSegments) {
+            // Right Most: Segments (Visual Debug)
+            JPanel debugPanel = new JPanel(new BorderLayout());
+            debugPanel.setBorder(BorderFactory.createTitledBorder("Zeilen-Segmente (Debug)"));
+            segmentsPanel = new JPanel();
+            segmentsPanel.setLayout(new BoxLayout(segmentsPanel, BoxLayout.Y_AXIS));
+            debugPanel.add(new JScrollPane(segmentsPanel), BorderLayout.CENTER);
 
-        JSplitPane innerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, rightPanel, debugPanel);
-        innerSplit.setResizeWeight(0.5);
+            JSplitPane innerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, rightPanel, debugPanel);
+            innerSplit.setResizeWeight(0.5);
 
-        splitPane.setRightComponent(innerSplit);
+            splitPane.setRightComponent(innerSplit);
+        } else {
+            splitPane.setRightComponent(rightPanel);
+        }
 
         add(splitPane, BorderLayout.CENTER);
 
@@ -186,7 +191,7 @@ public abstract class DocumentProcessorPanel extends JPanel {
         txtResult.setFont(txtResult.getFont().deriveFont(size));
     }
 
-    protected void loadImage(File file) {
+    public void loadImage(File file) {
         this.currentFile = file;
         this.currentRawData = null;
         try {
@@ -290,9 +295,11 @@ public abstract class DocumentProcessorPanel extends JPanel {
 
         // Clear previous results and debug segments
         txtResult.setText("");
-        segmentsPanel.removeAll();
-        segmentsPanel.revalidate();
-        segmentsPanel.repaint();
+        if (segmentsPanel != null) {
+            segmentsPanel.removeAll();
+            segmentsPanel.revalidate();
+            segmentsPanel.repaint();
+        }
 
         logger.info("Starting local recognition for {} images with language '{}'", imagePanels.size(), langCode);
 
@@ -322,7 +329,7 @@ public abstract class DocumentProcessorPanel extends JPanel {
                                     panel.setHighlight(bbox);
 
                                     // Add to debug segments panel
-                                    if (base64Image != null) {
+                                    if (showDebugSegments && base64Image != null) {
                                         try {
                                             byte[] bytes = Base64.getDecoder().decode(base64Image);
                                             BufferedImage segmentImg = ImageIO.read(new ByteArrayInputStream(bytes));
