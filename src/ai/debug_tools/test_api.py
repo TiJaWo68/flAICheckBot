@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from icr_prototype import app
+from app.api import app
 import numpy as np
 import cv2
 import io
