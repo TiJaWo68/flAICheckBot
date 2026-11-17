@@ -30,7 +30,7 @@ jobs:
       - name: Run Playwright E2E workflow tests
         env:
           DOCKER_API_VERSION: '1.44'
-        run: mvn --batch-mode clean test -Pe2e-tests
+        run: mvn --batch-mode clean test -Pproduction,e2e-tests
 
       - name: Upload Playwright failure artifacts
         if: failure()
