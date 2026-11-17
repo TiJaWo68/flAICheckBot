@@ -254,13 +254,11 @@ class ExamWorkflowE2ETest {
                 assignDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Speichern")).click();
                 assertThat(page.getByText("E2E Klausur 1").first()).isVisible();
 
-                page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Zur Korrektur öffnen")).first()
-                        .click();
+                page.locator("vaadin-button[aria-label='Zur Korrektur öffnen']").first().click();
                 assertThat(page.getByText("S01").first()).isVisible();
 
                 Path sampleScan = createSamplePngFile(tempStorageDir.resolve("scan-s01.png"));
-                page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Scans hochladen & schwärzen"))
-                        .first().click();
+                page.locator("vaadin-button[aria-label='Scans hochladen & schwärzen']").first().click();
                 Locator scanDialog = page.locator("vaadin-dialog[opened]").last();
                 scanDialog.locator("vaadin-upload input[type='file']").setInputFiles(sampleScan);
                 assertThat(scanDialog.getByRole(AriaRole.BUTTON,
@@ -274,8 +272,7 @@ class ExamWorkflowE2ETest {
                         new Page.GetByRoleOptions().setName("Alle hochgeladenen per KI bewerten")).click();
                 assertThat(page.getByText("KI-bewertet").first()).isVisible();
 
-                page.getByRole(AriaRole.BUTTON,
-                        new Page.GetByRoleOptions().setName("Review & Korrektur (Split-View)")).first().click();
+                page.locator("vaadin-button[aria-label='Review & Korrektur (Split-View)']").first().click();
                 Locator reviewDialog = page.locator("vaadin-dialog[opened]").last();
                 assertThat(reviewDialog.getByText("Reading Comprehension").first()).isVisible();
                 reviewDialog.getByRole(AriaRole.BUTTON,
