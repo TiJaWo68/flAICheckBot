@@ -1,5 +1,9 @@
 flaicheckbot:
   version: @project.version@
+  storage:
+    dir: ${FLAICHECKBOT_STORAGE_DIR:./data/scans}
+  migration:
+    enabled: ${FLAICHECKBOT_MIGRATION_ENABLED:true}
   logging:
     tcp:
       enabled: ${LOGGING_TCP_ENABLED:false}
@@ -10,6 +14,11 @@ flaicheckbot:
 spring:
   application:
     name: flaicheckbot
+
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 200MB
 
   datasource:
     url: ${FLAICHECKBOT_DB_URL:jdbc:postgresql://localhost:5432/flaicheckbot}

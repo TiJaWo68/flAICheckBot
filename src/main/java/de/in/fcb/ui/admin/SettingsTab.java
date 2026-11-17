@@ -168,8 +168,8 @@ public class SettingsTab extends VerticalLayout implements AdminTab {
                 aiHeading,
                 aiPreset,
                 aiBaseUrl,
-                modelRow,
                 aiApiKey,
+                modelRow,
                 actions);
         form.setResponsiveSteps(new FormLayout.ResponsiveStep("0", 1));
         updateAiFieldStates(AiPreset.DISABLED);

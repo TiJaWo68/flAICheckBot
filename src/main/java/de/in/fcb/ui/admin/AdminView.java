@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.tabs.Tab;
@@ -16,12 +17,13 @@ import de.in.fcb.admin.AppSettingService;
 import de.in.fcb.admin.SystemHealthService;
 import de.in.fcb.admin.UserService;
 import de.in.fcb.ai.AiClient;
+import de.in.fcb.migration.PocMigrationService;
 import de.in.fcb.ui.layout.MainLayout;
 import jakarta.annotation.security.RolesAllowed;
 
 /**
- * Administration area: user management, AI settings and system diagnostics,
- * restricted to {@code ROLE_ADMIN}.
+ * Administration area: user management, AI settings, PoC data migration and
+ * system diagnostics, restricted to {@code ROLE_ADMIN}.
  */
 @Route(value = "admin", layout = MainLayout.class)
 @RolesAllowed("ROLE_ADMIN")
@@ -35,7 +37,15 @@ public class AdminView extends VerticalLayout implements HasDynamicTitle {
             SystemHealthService systemHealthService,
             AuthenticationContext authenticationContext,
             AppSettingService appSettingService) {
-        this(userService, systemHealthService, authenticationContext, appSettingService, null);
+        this(userService, systemHealthService, authenticationContext, appSettingService, null, null, false);
+    }
+
+    public AdminView(UserService userService,
+            SystemHealthService systemHealthService,
+            AuthenticationContext authenticationContext,
+            AppSettingService appSettingService,
+            AiClient aiClient) {
+        this(userService, systemHealthService, authenticationContext, appSettingService, aiClient, null, false);
     }
 
     @Autowired
@@ -43,7 +53,9 @@ public class AdminView extends VerticalLayout implements HasDynamicTitle {
             SystemHealthService systemHealthService,
             AuthenticationContext authenticationContext,
             AppSettingService appSettingService,
-            AiClient aiClient) {
+            AiClient aiClient,
+            PocMigrationService pocMigrationService,
+            @Value("${flaicheckbot.migration.enabled:true}") boolean migrationEnabled) {
         setSizeFull();
         setPadding(true);
         setSpacing(false);
@@ -54,6 +66,9 @@ public class AdminView extends VerticalLayout implements HasDynamicTitle {
 
         registerTab(new UsersTab(userService, authenticationContext));
         registerTab(new SettingsTab(appSettingService, aiClient));
+        if (migrationEnabled && pocMigrationService != null) {
+            registerTab(new DataMigrationTab(pocMigrationService));
+        }
         registerTab(new SystemHealthTab(systemHealthService));
 
         tabBar.addSelectedChangeListener(event -> showSelectedTab());
