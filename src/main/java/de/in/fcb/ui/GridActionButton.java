@@ -24,6 +24,7 @@ public final class GridActionButton {
         Button button = new Button(icon.create(), clickListener);
         button.setTooltipText(tooltipText);
         button.setAriaLabel(tooltipText);
+        button.getElement().setAttribute("title", tooltipText);
         button.addThemeVariants(
                 ButtonVariant.LUMO_ICON,
                 ButtonVariant.LUMO_TERTIARY_INLINE,
