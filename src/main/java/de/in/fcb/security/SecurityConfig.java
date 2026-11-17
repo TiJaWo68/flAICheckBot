@@ -38,6 +38,7 @@ public class SecurityConfig {
             CustomOAuth2UserService customOAuth2UserService,
             @Value("${GOOGLE_CLIENT_ID:}") String googleClientId) throws Exception {
         http
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/VAADIN/dynamic/resource/**"))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
                         .requestMatchers(SETUP_ROUTE).permitAll());
