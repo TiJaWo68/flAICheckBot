@@ -256,8 +256,6 @@ class ExamWorkflowE2ETest {
                 selectComboBoxItem(assignDialog, "Test-Definition", "E2E Reading Test");
                 assignDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Speichern")).click();
                 assertThat(page.getByText("E2E Klausur 1").first()).isVisible();
-
-                page.getByTitle("Zur Korrektur öffnen").first().click();
                 assertThat(page.getByText("S01").first()).isVisible();
 
                 Path sampleScan = createSamplePngFile(tempStorageDir.resolve("scan-s01.png"));
