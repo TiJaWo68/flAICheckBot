@@ -22,7 +22,7 @@ jobs:
 
       - name: Install Playwright Chromium browser
         run: >
-          mvn --batch-mode test-compile exec:java
+          mvn --batch-mode test-compile org.codehaus.mojo:exec-maven-plugin:3.5.0:java
           -Dexec.classpathScope=test
           -Dexec.mainClass=com.microsoft.playwright.CLI
           -Dexec.args="install chromium --with-deps"
