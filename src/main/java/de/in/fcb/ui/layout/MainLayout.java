@@ -97,6 +97,9 @@ public class MainLayout extends AppLayout {
     static List<NavigationItem> navigationItems() {
         return List.of(
                 new NavigationItem("ui.nav.dashboard", "", VaadinIcon.DASHBOARD, Set.of()),
+                new NavigationItem("ui.nav.classes", "classes", VaadinIcon.GROUP, Set.of()),
+                new NavigationItem("ui.nav.tests", "tests", VaadinIcon.CLIPBOARD_TEXT, Set.of()),
+                new NavigationItem("ui.nav.assignments", "assignments", VaadinIcon.ACADEMY_CAP, Set.of()),
                 new NavigationItem("ui.nav.admin", "admin", VaadinIcon.COG, Set.of(ROLE_ADMIN)));
     }
 
