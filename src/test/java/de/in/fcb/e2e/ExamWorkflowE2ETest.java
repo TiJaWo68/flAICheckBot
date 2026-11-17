@@ -219,14 +219,14 @@ class ExamWorkflowE2ETest {
                 classDialog.getByLabel("Klassenname").fill("8b-E2E");
                 classDialog.getByLabel("Schuljahr").fill("2025/2026");
                 classDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Speichern")).click();
-                assertThat(page.getByText("8b-E2E")).isVisible();
+                assertThat(page.getByText("8b-E2E").first()).isVisible();
 
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Batch anlegen")).click();
                 Locator batchDialog = page.locator("vaadin-dialog[opened]").last();
                 batchDialog.getByLabel("Bis Nummer").fill("2");
                 batchDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Generieren")).click();
-                assertThat(page.getByText("S01")).isVisible();
-                assertThat(page.getByText("S02")).isVisible();
+                assertThat(page.getByText("S01").first()).isVisible();
+                assertThat(page.getByText("S02").first()).isVisible();
 
                 // 4. Test Definitions & AI Task Extraction
                 page.navigate(baseUrl("/tests"));
@@ -234,15 +234,15 @@ class ExamWorkflowE2ETest {
                 Locator testDialog = page.locator("vaadin-dialog[opened]").last();
                 testDialog.getByLabel("Titel").fill("E2E Reading Test");
                 testDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Speichern")).click();
-                assertThat(page.getByText("E2E Reading Test")).isVisible();
+                assertThat(page.getByText("E2E Reading Test").first()).isVisible();
 
                 page.getByLabel("Aufgabentext / Erwartungshorizont (Rohtext)")
                         .fill("Task 1: Summarize the story. Task 2: Explain two idioms.");
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Text speichern")).click();
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Aufgaben per KI strukturieren"))
                         .click();
-                assertThat(page.getByText("Reading Comprehension")).isVisible();
-                assertThat(page.getByText("Vocabulary")).isVisible();
+                assertThat(page.getByText("Reading Comprehension").first()).isVisible();
+                assertThat(page.getByText("Vocabulary").first()).isVisible();
 
                 // 5. Assignments -> Scan Upload -> Redact -> AI Batch Grade -> Review -> Export
                 page.navigate(baseUrl("/assignments"));
@@ -252,11 +252,11 @@ class ExamWorkflowE2ETest {
                 selectComboBoxItem(assignDialog, "Klasse", "8b-E2E");
                 selectComboBoxItem(assignDialog, "Test-Definition", "E2E Reading Test");
                 assignDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Speichern")).click();
-                assertThat(page.getByText("E2E Klausur 1")).isVisible();
+                assertThat(page.getByText("E2E Klausur 1").first()).isVisible();
 
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Zur Korrektur öffnen")).first()
                         .click();
-                assertThat(page.getByText("S01")).isVisible();
+                assertThat(page.getByText("S01").first()).isVisible();
 
                 Path sampleScan = createSamplePngFile(tempStorageDir.resolve("scan-s01.png"));
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Scans hochladen & schwärzen"))
@@ -272,15 +272,15 @@ class ExamWorkflowE2ETest {
 
                 page.getByRole(AriaRole.BUTTON,
                         new Page.GetByRoleOptions().setName("Alle hochgeladenen per KI bewerten")).click();
-                assertThat(page.getByText("KI-bewertet")).isVisible();
+                assertThat(page.getByText("KI-bewertet").first()).isVisible();
 
                 page.getByRole(AriaRole.BUTTON,
                         new Page.GetByRoleOptions().setName("Review & Korrektur (Split-View)")).first().click();
                 Locator reviewDialog = page.locator("vaadin-dialog[opened]").last();
-                assertThat(reviewDialog.getByText("Reading Comprehension")).isVisible();
+                assertThat(reviewDialog.getByText("Reading Comprehension").first()).isVisible();
                 reviewDialog.getByRole(AriaRole.BUTTON,
                         new Locator.GetByRoleOptions().setName("Als geprüft abschließen")).click();
-                assertThat(page.getByText("Geprüft")).isVisible();
+                assertThat(page.getByText("Geprüft").first()).isVisible();
 
                 Download pdfDownload = page.waitForDownload(() -> page.getByRole(
                         AriaRole.BUTTON, new Page.GetByRoleOptions().setName("PDF-Bericht")).click());
@@ -297,7 +297,7 @@ class ExamWorkflowE2ETest {
                 page.navigate(baseUrl("/admin"));
                 page.getByRole(AriaRole.TAB, new Page.GetByRoleOptions().setName("Datenmigration (PoC)")).click();
                 page.locator("vaadin-upload input[type='file']").setInputFiles(pocDb);
-                assertThat(page.getByText("PoC-Klasse-9a")).isVisible();
+                assertThat(page.getByText("PoC-Klasse-9a").first()).isVisible();
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Migration starten")).click();
                 assertThat(page.getByText("Ergebnis der Datenmigration")).isVisible();
 
