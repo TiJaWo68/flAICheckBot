@@ -67,7 +67,12 @@ import de.in.fcb.security.AuthProvider;
  * extraction, exam assignment, scan upload & redaction, AI batch grading,
  * split-view review, PDF/CSV export, and PoC SQLite database migration.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = {
+                "logging.level.org.springframework.security=DEBUG",
+                "logging.level.com.vaadin.flow.server.communication=DEBUG"
+        })
 @Testcontainers
 @Tag("e2e")
 class ExamWorkflowE2ETest {
