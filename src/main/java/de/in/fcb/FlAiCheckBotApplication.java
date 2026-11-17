@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import com.vaadin.flow.component.dependency.StyleSheet;
 import com.vaadin.flow.component.page.AppShellConfigurator;
 import com.vaadin.flow.component.page.Inline;
+import com.vaadin.flow.component.page.Push;
 import com.vaadin.flow.server.AppShellSettings;
 import com.vaadin.flow.server.LoadDependenciesOnStartup;
 import com.vaadin.flow.theme.Theme;
@@ -20,6 +21,7 @@ import de.in.fcb.ui.ResponsiveStyles;
  * components immediately without lazy chunk delays.
  */
 @SpringBootApplication
+@Push
 @Theme(variant = Lumo.DARK)
 @StyleSheet(Lumo.UTILITY_STYLESHEET)
 @StyleSheet(ResponsiveStyles.STYLESHEET)
