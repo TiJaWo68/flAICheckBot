@@ -21,8 +21,9 @@
         <java.version>25</java.version>
         <vaadin.version>25.3.5</vaadin.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- Integration tests (@Tag("integration")) are excluded locally and enabled in CI -->
-        <surefire.excludedGroups>integration</surefire.excludedGroups>
+        <!-- Integration and E2E tests are excluded locally and enabled via Maven profiles -->
+        <surefire.excludedGroups>integration,e2e</surefire.excludedGroups>
+        <surefire.groups></surefire.groups>
     </properties>
 
     <dependencyManagement>
@@ -126,6 +127,12 @@
             <artifactId>postgresql</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>1.51.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -168,6 +175,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <groups>${surefire.groups}</groups>
                     <excludedGroups>${surefire.excludedGroups}</excludedGroups>
                     <argLine>-javaagent:${net.bytebuddy:byte-buddy-agent:jar}</argLine>
                 </configuration>
@@ -179,6 +187,13 @@
         <profile>
             <id>integration-tests</id>
             <properties>
+                <surefire.excludedGroups>e2e</surefire.excludedGroups>
+            </properties>
+        </profile>
+        <profile>
+            <id>e2e-tests</id>
+            <properties>
+                <surefire.groups>e2e</surefire.groups>
                 <surefire.excludedGroups></surefire.excludedGroups>
             </properties>
         </profile>

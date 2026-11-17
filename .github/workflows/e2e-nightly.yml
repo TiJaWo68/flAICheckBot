@@ -1,0 +1,41 @@
+name: E2E Nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: Playwright E2E Click Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Install Playwright Chromium browser
+        run: >
+          mvn --batch-mode test-compile exec:java
+          -Dexec.classpathScope=test
+          -Dexec.mainClass=com.microsoft.playwright.CLI
+          -Dexec.args="install chromium --with-deps"
+
+      - name: Run Playwright E2E workflow tests
+        env:
+          DOCKER_API_VERSION: '1.44'
+        run: mvn --batch-mode clean test -Pe2e-tests
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: target/playwright-artifacts
+          if-no-files-found: ignore
