@@ -1,0 +1,11 @@
+@media (orientation: landscape) and (max-height: 500px) {
+    .fcb-hide-on-short-screen {
+        display: none !important;
+    }
+}
+
+@media (max-width: 699px) {
+    .fcb-dashboard-view {
+        padding: var(--lumo-space-xs) var(--lumo-space-s) !important;
+    }
+}

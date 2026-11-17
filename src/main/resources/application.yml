@@ -1,0 +1,31 @@
+flaicheckbot:
+  version: @project.version@
+  logging:
+    tcp:
+      enabled: ${LOGGING_TCP_ENABLED:false}
+      host: ${LOGGING_TCP_HOST:127.0.0.1}
+      port: ${LOGGING_TCP_PORT:4560}
+      destinations: ${LOGGING_TCP_DESTINATIONS:${LOGGING_TCP_HOST:127.0.0.1}:${LOGGING_TCP_PORT:4560}}
+
+spring:
+  application:
+    name: flaicheckbot
+
+  datasource:
+    url: ${FLAICHECKBOT_DB_URL:jdbc:postgresql://localhost:5432/flaicheckbot}
+    username: ${FLAICHECKBOT_DB_USER:flaicheckbot}
+    password: ${FLAICHECKBOT_DB_PASSWORD:flaicheckbot}
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+server:
+  port: 8080
+
+vaadin:
+  launch-browser: false
