@@ -215,14 +215,14 @@ class ExamWorkflowE2ETest {
                 // 3. Classes & Batch Students
                 page.navigate(baseUrl("/classes"));
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Neue Klasse")).click();
-                Locator classDialog = page.locator("vaadin-dialog-overlay");
+                Locator classDialog = page.locator("vaadin-dialog[opened]").last();
                 classDialog.getByLabel("Klassenname").fill("8b-E2E");
                 classDialog.getByLabel("Schuljahr").fill("2025/2026");
                 classDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Speichern")).click();
                 assertThat(page.getByText("8b-E2E")).isVisible();
 
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Batch anlegen")).click();
-                Locator batchDialog = page.locator("vaadin-dialog-overlay");
+                Locator batchDialog = page.locator("vaadin-dialog[opened]").last();
                 batchDialog.getByLabel("Bis Nummer").fill("2");
                 batchDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Generieren")).click();
                 assertThat(page.getByText("S01")).isVisible();
@@ -231,7 +231,7 @@ class ExamWorkflowE2ETest {
                 // 4. Test Definitions & AI Task Extraction
                 page.navigate(baseUrl("/tests"));
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Neuer Test")).click();
-                Locator testDialog = page.locator("vaadin-dialog-overlay");
+                Locator testDialog = page.locator("vaadin-dialog[opened]").last();
                 testDialog.getByLabel("Titel").fill("E2E Reading Test");
                 testDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Speichern")).click();
                 assertThat(page.getByText("E2E Reading Test")).isVisible();
@@ -247,7 +247,7 @@ class ExamWorkflowE2ETest {
                 // 5. Assignments -> Scan Upload -> Redact -> AI Batch Grade -> Review -> Export
                 page.navigate(baseUrl("/assignments"));
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Neue Klausur")).click();
-                Locator assignDialog = page.locator("vaadin-dialog-overlay");
+                Locator assignDialog = page.locator("vaadin-dialog[opened]").last();
                 assignDialog.getByLabel("Klausurtitel").fill("E2E Klausur 1");
                 selectComboBoxItem(assignDialog, "Klasse", "8b-E2E");
                 selectComboBoxItem(assignDialog, "Test-Definition", "E2E Reading Test");
@@ -261,7 +261,7 @@ class ExamWorkflowE2ETest {
                 Path sampleScan = createSamplePngFile(tempStorageDir.resolve("scan-s01.png"));
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Scans hochladen & schwärzen"))
                         .first().click();
-                Locator scanDialog = page.locator("vaadin-dialog-overlay");
+                Locator scanDialog = page.locator("vaadin-dialog[opened]").last();
                 scanDialog.locator("vaadin-upload input[type='file']").setInputFiles(sampleScan);
                 assertThat(scanDialog.getByRole(AriaRole.BUTTON,
                         new Locator.GetByRoleOptions().setName("Kopfzeile schwärzen (obere 15%)"))).isEnabled();
@@ -276,7 +276,7 @@ class ExamWorkflowE2ETest {
 
                 page.getByRole(AriaRole.BUTTON,
                         new Page.GetByRoleOptions().setName("Review & Korrektur (Split-View)")).first().click();
-                Locator reviewDialog = page.locator("vaadin-dialog-overlay");
+                Locator reviewDialog = page.locator("vaadin-dialog[opened]").last();
                 assertThat(reviewDialog.getByText("Reading Comprehension")).isVisible();
                 reviewDialog.getByRole(AriaRole.BUTTON,
                         new Locator.GetByRoleOptions().setName("Als geprüft abschließen")).click();
