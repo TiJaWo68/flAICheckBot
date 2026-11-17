@@ -41,10 +41,12 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Download;
+import com.microsoft.playwright.FileChooser;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.Tracing;
+import com.microsoft.playwright.assertions.LocatorAssertions;
 import com.microsoft.playwright.options.AriaRole;
 
 import de.in.fcb.ai.AiClient;
@@ -261,9 +263,13 @@ class ExamWorkflowE2ETest {
                 Path sampleScan = createSamplePngFile(tempStorageDir.resolve("scan-s01.png"));
                 page.getByTitle("Scans hochladen & schwärzen").first().click();
                 Locator scanDialog = page.locator("vaadin-dialog[opened]").last();
-                scanDialog.locator("vaadin-upload input[type='file']").setInputFiles(sampleScan);
+                FileChooser scanChooser = page.waitForFileChooser(() -> scanDialog.getByRole(
+                        AriaRole.BUTTON,
+                        new Locator.GetByRoleOptions().setName("Scans hochladen (.pdf, .png, .jpg)")).click());
+                scanChooser.setFiles(sampleScan);
                 assertThat(scanDialog.getByRole(AriaRole.BUTTON,
-                        new Locator.GetByRoleOptions().setName("Kopfzeile schwärzen (obere 15%)"))).isEnabled();
+                        new Locator.GetByRoleOptions().setName("Kopfzeile schwärzen (obere 15%)")))
+                        .isEnabled(new LocatorAssertions.IsEnabledOptions().setTimeout(15_000));
                 scanDialog.getByRole(AriaRole.BUTTON,
                         new Locator.GetByRoleOptions().setName("Kopfzeile schwärzen (obere 15%)")).click();
                 assertThat(scanDialog.getByText("Schwärzung dauerhaft im Bild gespeichert.")).isVisible();
@@ -294,7 +300,10 @@ class ExamWorkflowE2ETest {
                 Path pocDb = createSamplePocDb(tempStorageDir.resolve("flaicheckbot-e2e.db"), sampleScan);
                 page.navigate(baseUrl("/admin"));
                 page.getByRole(AriaRole.TAB, new Page.GetByRoleOptions().setName("Datenmigration (PoC)")).click();
-                page.locator("vaadin-upload input[type='file']").setInputFiles(pocDb);
+                FileChooser dbChooser = page.waitForFileChooser(() -> page.getByRole(
+                        AriaRole.BUTTON,
+                        new Page.GetByRoleOptions().setName("PoC-Datenbank hochladen (.db / .sqlite)")).click());
+                dbChooser.setFiles(pocDb);
                 assertThat(page.getByText("PoC-Klasse-9a").first()).isVisible();
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Migration starten")).click();
                 assertThat(page.getByText("Ergebnis der Datenmigration")).isVisible();
