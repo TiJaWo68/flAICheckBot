@@ -16,10 +16,7 @@ buildNumber.properties
 # JDT-specific (Eclipse Java Development Tools)
 .classpath
 
-# Project documentation (kept out of the repository)
-docs/*
 /flAICheckBot.code-workspace
-/docs/
 /.roo/
 /.settings/
 
