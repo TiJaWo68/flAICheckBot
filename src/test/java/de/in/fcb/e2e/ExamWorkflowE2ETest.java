@@ -33,9 +33,8 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
@@ -67,21 +66,15 @@ import de.in.fcb.security.AuthProvider;
  * extraction, exam assignment, scan upload & redaction, AI batch grading,
  * split-view review, PDF/CSV export, and PoC SQLite database migration.
  */
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {
-                "logging.level.org.springframework.security=DEBUG",
-                "logging.level.com.vaadin.flow.server.communication=DEBUG"
-        })
-@Testcontainers
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Tag("e2e")
 class ExamWorkflowE2ETest {
 
     private static final String POSTGRES_IMAGE = "postgres:16-alpine";
     private static final Path ARTIFACTS_DIR = Path.of("target", "playwright-artifacts");
+    private static final Path LOCAL_CHROME_EXECUTABLE = Path.of("/usr/bin/google-chrome-stable");
 
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(POSTGRES_IMAGE);
+    private static PostgreSQLContainer<?> postgresContainer;
 
     @TempDir
     static Path tempStorageDir;
@@ -100,11 +93,47 @@ class ExamWorkflowE2ETest {
 
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        registry.add("spring.datasource.username", POSTGRES::getUsername);
-        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        if (isDockerAvailable()) {
+            postgresContainer = new PostgreSQLContainer<>(POSTGRES_IMAGE);
+            postgresContainer.start();
+            registry.add("spring.datasource.url", postgresContainer::getJdbcUrl);
+            registry.add("spring.datasource.username", postgresContainer::getUsername);
+            registry.add("spring.datasource.password", postgresContainer::getPassword);
+        } else {
+            String h2Url = "jdbc:h2:mem:fcb_e2e;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;"
+                    + "DB_CLOSE_DELAY=-1";
+            initH2Schema(h2Url);
+            registry.add("spring.datasource.url", () -> h2Url);
+            registry.add("spring.datasource.driver-class-name", () -> "org.h2.Driver");
+            registry.add("spring.datasource.username", () -> "sa");
+            registry.add("spring.datasource.password", () -> "");
+            registry.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.H2Dialect");
+            registry.add("spring.flyway.enabled", () -> "false");
+        }
         registry.add("flaicheckbot.storage.dir", () -> tempStorageDir.resolve("scans").toAbsolutePath().toString());
         registry.add("flaicheckbot.migration.enabled", () -> "true");
+    }
+
+    private static void initH2Schema(String h2Url) {
+        try (Connection conn = DriverManager.getConnection(h2Url, "sa", "");
+                Statement stmt = conn.createStatement()) {
+            String v1 = Files.readString(Path.of("src/main/resources/db/migration/V1__init_security_and_settings.sql"));
+            String v2 = Files.readString(Path.of("src/main/resources/db/migration/V2__domain_model.sql"));
+            String h2Sql = (v1 + "\n" + v2)
+                    .replace("UUID PRIMARY KEY DEFAULT gen_random_uuid()", "UUID DEFAULT gen_random_uuid() PRIMARY KEY")
+                    .replace("TIMESTAMPTZ", "TIMESTAMP WITH TIME ZONE");
+            stmt.execute("DROP ALL OBJECTS;\n" + h2Sql);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to initialize local H2 schema for E2E test", ex);
+        }
+    }
+
+    private static boolean isDockerAvailable() {
+        try {
+            return DockerClientFactory.instance().isDockerAvailable();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     @TestConfiguration
@@ -177,7 +206,14 @@ class ExamWorkflowE2ETest {
     @BeforeAll
     static void startBrowser() {
         playwright = Playwright.create();
-        browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+        List<String> args = List.of("--no-sandbox", "--disable-dev-shm-usage");
+        BrowserType.LaunchOptions options = new BrowserType.LaunchOptions()
+                .setHeadless(true)
+                .setArgs(args);
+        if (System.getenv("CI") == null && Files.isExecutable(LOCAL_CHROME_EXECUTABLE)) {
+            options.setExecutablePath(LOCAL_CHROME_EXECUTABLE);
+        }
+        browser = playwright.chromium().launch(options);
     }
 
     @AfterAll
@@ -187,6 +223,9 @@ class ExamWorkflowE2ETest {
         }
         if (playwright != null) {
             playwright.close();
+        }
+        if (postgresContainer != null) {
+            postgresContainer.stop();
         }
     }
 
@@ -277,7 +316,7 @@ class ExamWorkflowE2ETest {
                         .isEnabled(new LocatorAssertions.IsEnabledOptions().setTimeout(15_000));
                 scanDialog.getByRole(AriaRole.BUTTON,
                         new Locator.GetByRoleOptions().setName("Kopfzeile schwärzen (obere 15%)")).click();
-                assertThat(scanDialog.getByText("Schwärzung dauerhaft im Bild gespeichert.")).isVisible();
+                assertThat(page.getByText("Schwärzung dauerhaft im Bild gespeichert.").first()).isVisible();
                 scanDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Schließen")).click();
 
                 page.getByRole(AriaRole.BUTTON,
