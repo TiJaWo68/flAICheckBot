@@ -92,4 +92,45 @@ class AiClientGradingTest {
         assertThat(result.tasks()).hasSize(1);
         assertThat(result.tasks().get(0).awardedPoints()).isEqualByComparingTo("10.00");
     }
+
+    @Test
+    void buildsVerbatimTranscriptionRequestWithIllegibleRule() throws Exception {
+        AiConfig config = new AiConfig(AiPreset.GEMINI, "https://example/v1", "gemini-2.5-flash", "key");
+
+        String json = aiClient.buildTranscriptionRequestJson(
+                config, List.of(new byte[] { 1, 2, 3 }), "EN");
+
+        assertThat(json).contains("VERBATIM ERROR PRESERVATION");
+        assertThat(json).contains("[unleserlich]");
+        assertThat(json).contains("data:image/png;base64,");
+        assertThat(json).contains("\"temperature\":0.0");
+        assertThat(json).contains("\"reasoning_effort\":\"low\"");
+    }
+
+    @Test
+    void parsesTranscriptionResponseAndIllegibleSegments() throws Exception {
+        String rawResponse = """
+                {
+                  "usage": {
+                    "prompt_tokens": 512,
+                    "completion_tokens": 64
+                  },
+                  "choices": [
+                    {
+                      "message": {
+                        "content": "{\\"recognizedText\\":\\"They rase you up [unleserlich] smart.\\",\\"illegibleSegments\\":[\\"word before smart\\"]}"
+                      }
+                    }
+                  ]
+                }
+                """;
+
+        TranscriptionResult result = aiClient.parseTranscriptionResponse(rawResponse, "gemini-2.5-flash");
+
+        assertThat(result.recognizedText()).isEqualTo("They rase you up [unleserlich] smart.");
+        assertThat(result.illegibleSegments()).containsExactly("word before smart");
+        assertThat(result.promptTokens()).isEqualTo(512);
+        assertThat(result.completionTokens()).isEqualTo(64);
+        assertThat(result.modelUsed()).isEqualTo("gemini-2.5-flash");
+    }
 }

@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -163,6 +164,54 @@ public class AiClient {
         }
     }
 
+    /**
+     * Performs verbatim 1:1 handwriting transcription across scanned page images
+     * without autocorrecting student errors, annotating illegible words as
+     * {@code [unleserlich]}.
+     */
+    public TranscriptionResult transcribeHandwriting(
+            AiConfig config,
+            List<byte[]> pagePngBytes,
+            String language) {
+        requireConfigured(config);
+        if (pagePngBytes == null || pagePngBytes.isEmpty()) {
+            throw new IllegalArgumentException("At least one scanned page is required");
+        }
+
+        try {
+            String requestJson = buildTranscriptionRequestJson(config, pagePngBytes, language);
+            String rawResponse = sendChatCompletionJson(config, requestJson);
+            return parseTranscriptionResponse(rawResponse, config.normalizedModel());
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to process AI transcription response: " + exception.getMessage(),
+                    exception);
+        }
+    }
+
+    String buildTranscriptionRequestJson(
+            AiConfig config,
+            List<byte[]> pagePngBytes,
+            String language) throws IOException {
+        String systemPrompt = """
+                You are a forensic handwriting transcription engine for foreign-language school exams.
+                Your ONLY task is to transcribe the handwritten text from the scanned page image(s) 1:1 into digital text.
+                CRITICAL RULES:
+                1. VERBATIM ERROR PRESERVATION: Copy every word, letter, spelling mistake, grammar error, wrong capitalization, and punctuation error 1:1 EXACTLY as written by the student. NEVER autocorrect or improve the student's text.
+                2. CROSSED-OUT TEXT: Ignore words or letters that the student visibly crossed out / struck through.
+                3. UNCERTAINTY / ILLEGIBLE WORDS: If a word or segment is genuinely illegible, do NOT guess or silently invent a correction. Write [unleserlich] at that exact position in "recognizedText" and add a short description in "illegibleSegments".
+                4. LINE & PARAGRAPH STRUCTURE: Preserve line breaks and task numbering as written.
+                Return ONLY valid JSON matching this schema:
+                {
+                  "recognizedText": "Exact 1:1 verbatim transcription including all student mistakes and [unleserlich] markers",
+                  "illegibleSegments": ["optional context around each [unleserlich] occurrence"]
+                }
+                """;
+
+        String userText = "Target language: " + (language == null || language.isBlank() ? "EN" : language.trim())
+                + "\nTranscribe the attached handwritten page(s) 1:1 verbatim without correcting student errors.";
+        return buildMultimodalPayload(config, systemPrompt, userText, pagePngBytes, 0.0);
+    }
+
     String buildGradingRequestJson(
             AiConfig config,
             TestDefinition test,
@@ -171,18 +220,22 @@ public class AiClient {
             List<byte[]> pagePngBytes) throws IOException {
         String systemPrompt = """
                 You are an experienced, fair foreign-language teacher evaluating a handwritten student exam from scanned page images.
-                Read every handwritten answer carefully across all pages, match each answer to its corresponding task, transcribe it accurately, and grade it against the reference solution and grading hints.
+                Read every handwritten answer carefully across all pages, match each answer to its corresponding task, transcribe it 1:1 verbatim, and grade it against the reference solution and grading hints.
+                CRITICAL TRANSCRIPTION RULES (for both "recognizedText" and each task's "recognizedAnswer"):
+                - Copy every word, spelling mistake, grammar error, wrong capitalization, and punctuation error 1:1 EXACTLY as written by the student. NEVER autocorrect or improve student errors in the transcription.
+                - Ignore words or letters visibly crossed out / struck through by the student.
+                - If a word is genuinely illegible, do NOT guess or silently correct it — write [unleserlich] at that exact position instead.
                 Give helpful, constructive feedback in German (pointing out grammar, vocabulary, spelling, and content errors in the target foreign language).
                 Never award more than maxPoints or less than 0 for any task.
                 Return ONLY valid JSON matching this schema:
                 {
-                  "recognizedText": "Complete clean transcription of the student's work across all pages",
+                  "recognizedText": "Complete 1:1 verbatim transcription of the student's work across all pages (preserving all mistakes and [unleserlich] markers)",
                   "overallFeedback": "Concise overall summary and encouragement in German",
                   "tasks": [
                     {
                       "position": 1,
                       "taskTitle": "Task title",
-                      "recognizedAnswer": "Transcribed student answer for this task",
+                      "recognizedAnswer": "1:1 verbatim transcribed student answer for this task",
                       "awardedPoints": 7.5,
                       "maxPoints": 10.0,
                       "feedback": "Task-specific grading explanation in German",
@@ -210,6 +263,15 @@ public class AiClient {
                 + "\nPseudonymized student ID: " + (studentExternalId != null ? studentExternalId : "unknown")
                 + "\nTasks:\n" + objectMapper.writeValueAsString(taskSpecs);
 
+        return buildMultimodalPayload(config, systemPrompt, userText, pagePngBytes, 0.1);
+    }
+
+    private String buildMultimodalPayload(
+            AiConfig config,
+            String systemPrompt,
+            String userText,
+            List<byte[]> pagePngBytes,
+            double temperature) throws IOException {
         List<Map<String, Object>> contentParts = new ArrayList<>();
         contentParts.add(Map.of("type", "text", "text", userText));
         for (byte[] png : pagePngBytes) {
@@ -219,13 +281,26 @@ public class AiClient {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", config.normalizedModel());
-        payload.put("temperature", 0.1);
+        payload.put("temperature", temperature);
+        if (shouldUseLowReasoningEffort(config)) {
+            payload.put("reasoning_effort", "low");
+        }
         payload.put("response_format", Map.of("type", "json_object"));
         payload.put("messages", List.of(
                 Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", contentParts)));
 
         return objectMapper.writeValueAsString(payload);
+    }
+
+    private static boolean shouldUseLowReasoningEffort(AiConfig config) {
+        if (config == null) {
+            return false;
+        }
+        String model = config.normalizedModel().toLowerCase(Locale.ROOT);
+        return config.preset() == AiPreset.GEMINI
+                || config.normalizedBaseUrl().contains("generativelanguage.googleapis.com")
+                || model.startsWith("gemini-");
     }
 
     List<ExtractedTask> parseExtractedTasksResponse(String rawResponse) throws IOException {
@@ -291,6 +366,28 @@ public class AiClient {
         }
 
         return new GradingResult(recognizedText, overallFeedback, evaluations, promptTokens, completionTokens, modelUsed);
+    }
+
+    TranscriptionResult parseTranscriptionResponse(String rawResponse, String modelUsed) throws IOException {
+        JsonNode root = objectMapper.readTree(rawResponse);
+        JsonNode usage = root.path("usage");
+        int promptTokens = usage.path("prompt_tokens").asInt(0);
+        int completionTokens = usage.path("completion_tokens").asInt(0);
+
+        JsonNode parsed = extractAssistantJson(root);
+        String recognizedText = parsed.path("recognizedText").asText("").trim();
+        List<String> illegibleSegments = new ArrayList<>();
+        JsonNode segmentsNode = parsed.path("illegibleSegments");
+        if (segmentsNode.isArray()) {
+            for (JsonNode entry : segmentsNode) {
+                String segment = entry.asText("").trim();
+                if (!segment.isEmpty()) {
+                    illegibleSegments.add(segment);
+                }
+            }
+        }
+        return new TranscriptionResult(
+                recognizedText, List.copyOf(illegibleSegments), promptTokens, completionTokens, modelUsed);
     }
 
     private String sendChatCompletion(AiConfig config, Map<String, Object> payload) {

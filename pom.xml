@@ -21,8 +21,8 @@
         <java.version>25</java.version>
         <vaadin.version>25.3.5</vaadin.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- Integration and E2E tests are excluded locally and enabled via Maven profiles -->
-        <surefire.excludedGroups>integration,e2e</surefire.excludedGroups>
+        <!-- Integration, E2E and Benchmark tests are excluded locally and enabled via Maven profiles -->
+        <surefire.excludedGroups>integration,e2e,benchmark</surefire.excludedGroups>
         <surefire.groups></surefire.groups>
     </properties>
 
@@ -192,13 +192,20 @@
         <profile>
             <id>integration-tests</id>
             <properties>
-                <surefire.excludedGroups>e2e</surefire.excludedGroups>
+                <surefire.excludedGroups>e2e,benchmark</surefire.excludedGroups>
             </properties>
         </profile>
         <profile>
             <id>e2e-tests</id>
             <properties>
                 <surefire.groups>e2e</surefire.groups>
+                <surefire.excludedGroups></surefire.excludedGroups>
+            </properties>
+        </profile>
+        <profile>
+            <id>benchmark-tests</id>
+            <properties>
+                <surefire.groups>benchmark</surefire.groups>
                 <surefire.excludedGroups></surefire.excludedGroups>
             </properties>
         </profile>

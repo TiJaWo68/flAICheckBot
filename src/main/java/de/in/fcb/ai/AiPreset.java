@@ -7,7 +7,7 @@ package de.in.fcb.ai;
 public enum AiPreset {
 
     DISABLED("", "", false),
-    GEMINI("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash", true),
+    GEMINI("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.8-flash", true),
     OPENAI("https://api.openai.com/v1", "gpt-4o-mini", true),
     OLLAMA("http://localhost:11434/v1", "qwen2.5vl:7b", false),
     CUSTOM("", "", false);
