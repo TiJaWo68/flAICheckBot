@@ -11,21 +11,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
           cache: maven
-
-      - name: Install Playwright Chromium browser
-        run: >
-          mvn --batch-mode test-compile org.codehaus.mojo:exec-maven-plugin:3.5.0:java
-          -Dexec.classpathScope=test
-          -Dexec.mainClass=com.microsoft.playwright.CLI
-          -Dexec.args="install chromium --with-deps"
 
       - name: Run Playwright E2E workflow tests
         env:
@@ -34,7 +27,7 @@ jobs:
 
       - name: Upload Playwright failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-artifacts
           path: target/playwright-artifacts

@@ -14,6 +14,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -72,7 +73,9 @@ class ExamWorkflowE2ETest {
 
     private static final String POSTGRES_IMAGE = "postgres:16-alpine";
     private static final Path ARTIFACTS_DIR = Path.of("target", "playwright-artifacts");
-    private static final Path LOCAL_CHROME_EXECUTABLE = Path.of("/usr/bin/google-chrome-stable");
+    private static final List<Path> SYSTEM_CHROME_CANDIDATES = List.of(
+            Path.of("/usr/bin/google-chrome-stable"),
+            Path.of("/usr/bin/google-chrome"));
 
     private static PostgreSQLContainer<?> postgresContainer;
 
@@ -205,15 +208,27 @@ class ExamWorkflowE2ETest {
 
     @BeforeAll
     static void startBrowser() {
-        playwright = Playwright.create();
+        Path systemChrome = findSystemChromeExecutable();
+        Playwright.CreateOptions createOptions = new Playwright.CreateOptions();
+        if (systemChrome != null) {
+            createOptions.setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1"));
+        }
+        playwright = Playwright.create(createOptions);
         List<String> args = List.of("--no-sandbox", "--disable-dev-shm-usage");
         BrowserType.LaunchOptions options = new BrowserType.LaunchOptions()
                 .setHeadless(true)
                 .setArgs(args);
-        if (System.getenv("CI") == null && Files.isExecutable(LOCAL_CHROME_EXECUTABLE)) {
-            options.setExecutablePath(LOCAL_CHROME_EXECUTABLE);
+        if (systemChrome != null) {
+            options.setExecutablePath(systemChrome);
         }
         browser = playwright.chromium().launch(options);
+    }
+
+    private static Path findSystemChromeExecutable() {
+        return SYSTEM_CHROME_CANDIDATES.stream()
+                .filter(Files::isExecutable)
+                .findFirst()
+                .orElse(null);
     }
 
     @AfterAll
@@ -311,11 +326,23 @@ class ExamWorkflowE2ETest {
                         AriaRole.BUTTON,
                         new Locator.GetByRoleOptions().setName("Scans hochladen (.pdf, .png, .jpg)")).click());
                 scanChooser.setFiles(sampleScan);
-                assertThat(scanDialog.getByRole(AriaRole.BUTTON,
-                        new Locator.GetByRoleOptions().setName("Kopfzeile schwärzen (obere 15%)")))
-                        .isEnabled(new LocatorAssertions.IsEnabledOptions().setTimeout(15_000));
-                scanDialog.getByRole(AriaRole.BUTTON,
-                        new Locator.GetByRoleOptions().setName("Kopfzeile schwärzen (obere 15%)")).click();
+                Locator scanImg = scanDialog.locator("img").first();
+                assertThat(scanImg).isVisible(new LocatorAssertions.IsVisibleOptions().setTimeout(15_000));
+                com.microsoft.playwright.options.BoundingBox box = scanImg.boundingBox();
+                page.mouse().move(box.x + 12, box.y + 12);
+                page.mouse().down();
+                page.mouse().move(box.x + Math.max(40, box.width * 0.6), box.y + 52);
+                page.mouse().up();
+                assertThat(page.getByText("Schwärzung dauerhaft im Bild gespeichert.").first()).isVisible();
+                Locator undoButton = scanDialog.getByRole(AriaRole.BUTTON,
+                        new Locator.GetByRoleOptions().setName("Rückgängig"));
+                assertThat(undoButton).isEnabled();
+                undoButton.click();
+                assertThat(page.getByText("Letzte Schwärzung rückgängig gemacht.").first()).isVisible();
+                page.mouse().move(box.x + 12, box.y + 12);
+                page.mouse().down();
+                page.mouse().move(box.x + Math.max(40, box.width * 0.6), box.y + 52);
+                page.mouse().up();
                 assertThat(page.getByText("Schwärzung dauerhaft im Bild gespeichert.").first()).isVisible();
                 scanDialog.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Schließen")).click();
 
