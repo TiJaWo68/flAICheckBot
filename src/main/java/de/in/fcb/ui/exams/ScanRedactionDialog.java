@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.vaadin.flow.component.ClientCallable;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.dialog.Dialog;
@@ -19,7 +20,6 @@ import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.orderedlayout.FlexComponent.Alignment;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
-import com.vaadin.flow.component.textfield.NumberField;
 import com.vaadin.flow.component.upload.Upload;
 import com.vaadin.flow.theme.lumo.LumoUtility;
 
@@ -31,8 +31,8 @@ import de.in.fcb.exams.StudentWorkPage;
 
 /**
  * Dialog for uploading scan pages (PDF or images), previewing them, rotating
- * pages, and permanently burning black redaction rectangles onto stored PNGs
- * prior to sending them to an external AI provider.
+ * pages, interactively drawing black redaction boxes with the mouse, and
+ * undoing or resetting redactions without losing the unredacted local backup.
  */
 public class ScanRedactionDialog extends Dialog {
 
@@ -46,16 +46,14 @@ public class ScanRedactionDialog extends Dialog {
     private final Button prevButton = new Button(VaadinIcon.ARROW_LEFT.create());
     private final Button nextButton = new Button(VaadinIcon.ARROW_RIGHT.create());
     private final Button rotateButton = new Button();
-    private final Button redactHeaderButton = new Button();
+    private final Button undoRedactionButton = new Button();
+    private final Button clearRedactionsButton = new Button();
     private final Button deletePageButton = new Button();
 
-    private final NumberField xPercent = new NumberField("X %");
-    private final NumberField yPercent = new NumberField("Y %");
-    private final NumberField wPercent = new NumberField("Breite %");
-    private final NumberField hPercent = new NumberField("Höhe %");
-    private final Button redactCustomButton = new Button();
-
+    private final Span drawHint = new Span();
     private final Image previewImage = new Image();
+    private final Div selectionOverlay = new Div();
+    private final Div imageStage;
     private final Span emptyLabel = new Span();
 
     private StudentWork currentWork;
@@ -88,10 +86,14 @@ public class ScanRedactionDialog extends Dialog {
         rotateButton.setIcon(VaadinIcon.ROTATE_RIGHT.create());
         rotateButton.addClickListener(e -> rotateCurrentPage());
 
-        redactHeaderButton.setText(getTranslation("exams.scans.button.redact-header"));
-        redactHeaderButton.setIcon(VaadinIcon.EYE_SLASH.create());
-        redactHeaderButton.addThemeVariants(ButtonVariant.LUMO_CONTRAST);
-        redactHeaderButton.addClickListener(e -> redactCurrentPage(0.0, 0.0, 1.0, 0.15));
+        undoRedactionButton.setText(getTranslation("exams.scans.button.undo"));
+        undoRedactionButton.setIcon(VaadinIcon.ROTATE_LEFT.create());
+        undoRedactionButton.addClickListener(e -> undoLastRedaction());
+
+        clearRedactionsButton.setText(getTranslation("exams.scans.button.reset-redactions"));
+        clearRedactionsButton.setIcon(VaadinIcon.CLOSE_CIRCLE_O.create());
+        clearRedactionsButton.addThemeVariants(ButtonVariant.LUMO_CONTRAST);
+        clearRedactionsButton.addClickListener(e -> clearAllRedactions());
 
         deletePageButton.setText(getTranslation("exams.scans.button.delete-page"));
         deletePageButton.setIcon(VaadinIcon.TRASH.create());
@@ -99,36 +101,43 @@ public class ScanRedactionDialog extends Dialog {
         deletePageButton.addClickListener(e -> deleteCurrentPage());
 
         HorizontalLayout pageControls = new HorizontalLayout(
-                prevButton, pageIndicator, nextButton, rotateButton, redactHeaderButton, deletePageButton);
+                prevButton, pageIndicator, nextButton, rotateButton,
+                undoRedactionButton, clearRedactionsButton, deletePageButton);
         pageControls.setWidthFull();
         pageControls.setDefaultVerticalComponentAlignment(Alignment.CENTER);
         pageControls.getStyle().set("flex-wrap", "wrap");
 
-        configureCoordField(xPercent, 0.0);
-        configureCoordField(yPercent, 0.0);
-        configureCoordField(wPercent, 100.0);
-        configureCoordField(hPercent, 12.0);
-        redactCustomButton.setText(getTranslation("exams.scans.button.redact-area"));
-        redactCustomButton.setIcon(VaadinIcon.CROP.create());
-        redactCustomButton.addClickListener(e -> redactCurrentPage(
-                valOrZero(xPercent) / 100.0,
-                valOrZero(yPercent) / 100.0,
-                valOrZero(wPercent) / 100.0,
-                valOrZero(hPercent) / 100.0));
+        drawHint.setText(getTranslation("exams.scans.draw-hint"));
+        drawHint.addClassNames(LumoUtility.FontSize.SMALL, LumoUtility.TextColor.SECONDARY);
 
-        HorizontalLayout customRedactionBar = new HorizontalLayout(
-                xPercent, yPercent, wPercent, hPercent, redactCustomButton);
-        customRedactionBar.setWidthFull();
-        customRedactionBar.setDefaultVerticalComponentAlignment(Alignment.BASELINE);
-        customRedactionBar.getStyle().set("flex-wrap", "wrap");
+        previewImage.getElement().setAttribute("draggable", "false");
+        previewImage.getStyle()
+                .set("display", "block")
+                .set("max-width", "100%")
+                .set("user-select", "none")
+                .set("border", "1px solid var(--lumo-contrast-20pct)");
 
-        previewImage.setMaxWidth("100%");
-        previewImage.getStyle().set("border", "1px solid var(--lumo-contrast-20pct)");
+        selectionOverlay.getStyle()
+                .set("position", "absolute")
+                .set("border", "2px dashed #ff5252")
+                .set("background", "rgba(0, 0, 0, 0.45)")
+                .set("pointer-events", "none")
+                .set("display", "none")
+                .set("box-sizing", "border-box");
+
+        imageStage = new Div(previewImage, selectionOverlay);
+        imageStage.getStyle()
+                .set("position", "relative")
+                .set("display", "inline-block")
+                .set("user-select", "none")
+                .set("cursor", "crosshair")
+                .set("line-height", "0");
+        installMouseDrawingHandler();
 
         emptyLabel.setText(getTranslation("exams.scans.empty"));
         emptyLabel.addClassNames(LumoUtility.TextColor.SECONDARY);
 
-        Div previewContainer = new Div(emptyLabel, previewImage);
+        Div previewContainer = new Div(emptyLabel, imageStage);
         previewContainer.setWidthFull();
         previewContainer.getStyle().set("overflow", "auto");
         previewContainer.getStyle().set("flex", "1 1 auto");
@@ -138,7 +147,7 @@ public class ScanRedactionDialog extends Dialog {
         closeButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         getFooter().add(closeButton);
 
-        VerticalLayout root = new VerticalLayout(upload, pageControls, customRedactionBar, previewContainer);
+        VerticalLayout root = new VerticalLayout(upload, pageControls, drawHint, previewContainer);
         root.setSizeFull();
         root.setPadding(false);
         root.setSpacing(true);
@@ -156,6 +165,87 @@ public class ScanRedactionDialog extends Dialog {
                 student != null ? student.formatTeacherLabel() : work.getStudentId()));
         reloadPages();
         open();
+    }
+
+    @ClientCallable
+    public void onDrawRedaction(double normX, double normY, double normWidth, double normHeight) {
+        if (normWidth <= 0.0 || normHeight <= 0.0) {
+            return;
+        }
+        redactCurrentPage(normX, normY, normWidth, normHeight);
+    }
+
+    private void installMouseDrawingHandler() {
+        imageStage.getElement().executeJs("""
+                (function(host, stage, img, overlay) {
+                  if (stage._redactBound) return;
+                  stage._redactBound = true;
+                  let dragging = false;
+                  let startX = 0;
+                  let startY = 0;
+                  let rect = null;
+
+                  function clamp(val, min, max) {
+                    return Math.max(min, Math.min(max, val));
+                  }
+
+                  function updateBox(clientX, clientY) {
+                    const curX = clamp(clientX - rect.left, 0, rect.width);
+                    const curY = clamp(clientY - rect.top, 0, rect.height);
+                    const x = Math.min(startX, curX);
+                    const y = Math.min(startY, curY);
+                    const w = Math.abs(curX - startX);
+                    const h = Math.abs(curY - startY);
+                    overlay.style.left = x + 'px';
+                    overlay.style.top = y + 'px';
+                    overlay.style.width = w + 'px';
+                    overlay.style.height = h + 'px';
+                    return { x: x, y: y, w: w, h: h };
+                  }
+
+                  stage.addEventListener('pointerdown', function(e) {
+                    if (e.button !== 0) return;
+                    rect = img.getBoundingClientRect();
+                    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+                    e.preventDefault();
+                    dragging = true;
+                    startX = clamp(e.clientX - rect.left, 0, rect.width);
+                    startY = clamp(e.clientY - rect.top, 0, rect.height);
+                    overlay.style.display = 'block';
+                    updateBox(e.clientX, e.clientY);
+                    if (stage.setPointerCapture) {
+                      try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+                    }
+                  });
+
+                  stage.addEventListener('pointermove', function(e) {
+                    if (!dragging) return;
+                    e.preventDefault();
+                    updateBox(e.clientX, e.clientY);
+                  });
+
+                  function finish(e, commit) {
+                    if (!dragging) return;
+                    dragging = false;
+                    const box = updateBox(e.clientX, e.clientY);
+                    overlay.style.display = 'none';
+                    if (stage.releasePointerCapture) {
+                      try { stage.releasePointerCapture(e.pointerId); } catch (_) {}
+                    }
+                    if (commit && rect && rect.width > 0 && rect.height > 0 && box.w >= 8 && box.h >= 8) {
+                      host.$server.onDrawRedaction(
+                        box.x / rect.width,
+                        box.y / rect.height,
+                        box.w / rect.width,
+                        box.h / rect.height
+                      );
+                    }
+                  }
+
+                  stage.addEventListener('pointerup', function(e) { finish(e, true); });
+                  stage.addEventListener('pointercancel', function(e) { finish(e, false); });
+                })($0, $1, $2, $3);
+                """, getElement(), imageStage.getElement(), previewImage.getElement(), selectionOverlay.getElement());
     }
 
     private OutputStream receiveUpload(String fileName, String mimeType) {
@@ -196,14 +286,15 @@ public class ScanRedactionDialog extends Dialog {
         prevButton.setEnabled(hasPages && index > 0);
         nextButton.setEnabled(hasPages && index < pages.size() - 1);
         rotateButton.setEnabled(hasPages);
-        redactHeaderButton.setEnabled(hasPages);
-        redactCustomButton.setEnabled(hasPages);
         deletePageButton.setEnabled(hasPages);
-        previewImage.setVisible(hasPages);
+        imageStage.setVisible(hasPages);
+        drawHint.setVisible(hasPages);
         emptyLabel.setVisible(!hasPages);
 
         if (!hasPages) {
             pageIndicator.setText("0 / 0");
+            undoRedactionButton.setEnabled(false);
+            clearRedactionsButton.setEnabled(false);
             return;
         }
 
@@ -211,6 +302,10 @@ public class ScanRedactionDialog extends Dialog {
         pageIndicator.setText((currentIndex + 1) + " / " + pages.size());
 
         StudentWorkPage page = pages.get(currentIndex);
+        boolean hasRedactions = !assignmentService.parseRedactionBoxes(page.getRedactionBoxesJson()).isEmpty();
+        undoRedactionButton.setEnabled(hasRedactions);
+        clearRedactionsButton.setEnabled(hasRedactions);
+
         try {
             byte[] bytes = scanStorageService.readImageBytes(page.getStoragePath());
             previewImage.setSrc("data:image/png;base64," + Base64.getEncoder().encodeToString(bytes));
@@ -226,7 +321,7 @@ public class ScanRedactionDialog extends Dialog {
         }
         try {
             assignmentService.rotatePage(pages.get(currentIndex).getId(), 90);
-            showPage(currentIndex);
+            reloadPages();
         } catch (IOException ex) {
             Notification.show(ex.getMessage(), 4000, Notification.Position.MIDDLE);
         }
@@ -238,8 +333,36 @@ public class ScanRedactionDialog extends Dialog {
         }
         try {
             assignmentService.redactPage(pages.get(currentIndex).getId(), normX, normY, normW, normH);
-            showPage(currentIndex);
+            reloadPages();
             Notification.show(getTranslation("exams.scans.redacted"), 2500, Notification.Position.MIDDLE);
+        } catch (Exception ex) {
+            Notification.show(ex.getMessage(), 4000, Notification.Position.MIDDLE);
+        }
+    }
+
+    private void undoLastRedaction() {
+        if (pages.isEmpty()) {
+            return;
+        }
+        try {
+            if (assignmentService.undoLastRedaction(pages.get(currentIndex).getId())) {
+                reloadPages();
+                Notification.show(getTranslation("exams.scans.undone"), 2500, Notification.Position.MIDDLE);
+            }
+        } catch (Exception ex) {
+            Notification.show(ex.getMessage(), 4000, Notification.Position.MIDDLE);
+        }
+    }
+
+    private void clearAllRedactions() {
+        if (pages.isEmpty()) {
+            return;
+        }
+        try {
+            if (assignmentService.clearRedactions(pages.get(currentIndex).getId())) {
+                reloadPages();
+                Notification.show(getTranslation("exams.scans.reset"), 2500, Notification.Position.MIDDLE);
+            }
         } catch (Exception ex) {
             Notification.show(ex.getMessage(), 4000, Notification.Position.MIDDLE);
         }
@@ -254,17 +377,5 @@ public class ScanRedactionDialog extends Dialog {
         if (onChanged != null) {
             onChanged.run();
         }
-    }
-
-    private static void configureCoordField(NumberField field, double initial) {
-        field.setWidth("95px");
-        field.setMin(0);
-        field.setMax(100);
-        field.setStep(1);
-        field.setValue(initial);
-    }
-
-    private static double valOrZero(NumberField field) {
-        return field.getValue() != null ? field.getValue() : 0.0;
     }
 }

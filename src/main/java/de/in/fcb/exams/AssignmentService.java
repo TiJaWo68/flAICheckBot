@@ -154,6 +154,14 @@ public class AssignmentService {
         StudentWorkPage page = pageRepository.findById(pageId)
                 .orElseThrow(() -> new IllegalArgumentException("Page not found: " + pageId));
         scanStorageService.rotatePage(page.getStoragePath(), degreesClockwise);
+        List<RedactionBox> boxes = parseRedactionBoxes(page.getRedactionBoxesJson());
+        if (!boxes.isEmpty()) {
+            List<RedactionBox> rotated = boxes.stream()
+                    .map(box -> box.rotateClockwise(degreesClockwise))
+                    .toList();
+            page.setRedactionBoxesJson(objectMapper.writeValueAsString(rotated));
+            pageRepository.save(page);
+        }
     }
 
     @Transactional
@@ -161,12 +169,40 @@ public class AssignmentService {
             throws IOException {
         StudentWorkPage page = pageRepository.findById(pageId)
                 .orElseThrow(() -> new IllegalArgumentException("Page not found: " + pageId));
-        scanStorageService.applyRedactionBox(page.getStoragePath(), normX, normY, normWidth, normHeight);
-
         List<RedactionBox> boxes = parseRedactionBoxes(page.getRedactionBoxesJson());
         boxes.add(new RedactionBox(normX, normY, normWidth, normHeight));
+        scanStorageService.renderRedactedImage(page.getStoragePath(), boxes);
         page.setRedactionBoxesJson(objectMapper.writeValueAsString(boxes));
         pageRepository.save(page);
+    }
+
+    @Transactional
+    public boolean undoLastRedaction(UUID pageId) throws IOException {
+        StudentWorkPage page = pageRepository.findById(pageId)
+                .orElseThrow(() -> new IllegalArgumentException("Page not found: " + pageId));
+        List<RedactionBox> boxes = parseRedactionBoxes(page.getRedactionBoxesJson());
+        if (boxes.isEmpty()) {
+            return false;
+        }
+        boxes.remove(boxes.size() - 1);
+        scanStorageService.renderRedactedImage(page.getStoragePath(), boxes);
+        page.setRedactionBoxesJson(boxes.isEmpty() ? null : objectMapper.writeValueAsString(boxes));
+        pageRepository.save(page);
+        return true;
+    }
+
+    @Transactional
+    public boolean clearRedactions(UUID pageId) throws IOException {
+        StudentWorkPage page = pageRepository.findById(pageId)
+                .orElseThrow(() -> new IllegalArgumentException("Page not found: " + pageId));
+        List<RedactionBox> boxes = parseRedactionBoxes(page.getRedactionBoxesJson());
+        if (boxes.isEmpty()) {
+            return false;
+        }
+        scanStorageService.renderRedactedImage(page.getStoragePath(), List.of());
+        page.setRedactionBoxesJson(null);
+        pageRepository.save(page);
+        return true;
     }
 
     @Transactional
@@ -274,7 +310,7 @@ public class AssignmentService {
         }
     }
 
-    private List<RedactionBox> parseRedactionBoxes(String json) {
+    public List<RedactionBox> parseRedactionBoxes(String json) {
         if (json == null || json.isBlank()) {
             return new ArrayList<>();
         }
@@ -284,8 +320,5 @@ public class AssignmentService {
         } catch (IOException exception) {
             return new ArrayList<>();
         }
-    }
-
-    public record RedactionBox(double x, double y, double width, double height) {
     }
 }

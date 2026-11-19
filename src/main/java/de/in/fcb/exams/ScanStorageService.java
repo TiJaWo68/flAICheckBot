@@ -8,6 +8,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -96,7 +97,9 @@ public class ScanStorageService {
         for (BufferedImage pageImage : images) {
             String fileName = "page-" + pageNum + "-" + UUID.randomUUID().toString().substring(0, 8) + ".png";
             Path target = workDir.resolve(fileName).normalize();
-            ImageIO.write(toRgbImage(pageImage), PNG_FORMAT, target.toFile());
+            BufferedImage rgb = toRgbImage(pageImage);
+            ImageIO.write(rgb, PNG_FORMAT, target.toFile());
+            ImageIO.write(rgb, PNG_FORMAT, resolveOriginalPath(target).toFile());
             storedPaths.add(storageRoot.relativize(target).toString().replace('\\', '/'));
             pageNum++;
         }
@@ -104,7 +107,8 @@ public class ScanStorageService {
     }
 
     /**
-     * Rotates an already stored PNG image clockwise in 90-degree increments.
+     * Rotates an already stored PNG image (and its untouched original backup, if
+     * present) clockwise in 90-degree increments.
      */
     public void rotatePage(String storagePath, int degreesClockwise) throws IOException {
         int normalized = ((degreesClockwise % 360) + 360) % 360;
@@ -116,18 +120,16 @@ public class ScanStorageService {
         }
 
         Path path = resolveSafePath(storagePath);
-        BufferedImage source = ImageIO.read(path.toFile());
-        if (source == null) {
-            throw new IOException("Cannot read image at " + storagePath);
+        rotateFileInPlace(path, normalized);
+        Path origPath = resolveOriginalPath(path);
+        if (Files.exists(origPath)) {
+            rotateFileInPlace(origPath, normalized);
         }
-        BufferedImage rotated = rotateClockwise(source, normalized);
-        ImageIO.write(rotated, PNG_FORMAT, path.toFile());
     }
 
     /**
-     * Burns a solid black rectangle onto the stored PNG image using normalized
-     * coordinates ({@code 0.0..1.0}) so redacted content (such as student names)
-     * never leaves the server.
+     * Burns a single solid black rectangle onto the stored PNG image using
+     * normalized coordinates ({@code 0.0..1.0}).
      */
     public void applyRedactionBox(
             String storagePath,
@@ -136,33 +138,34 @@ public class ScanStorageService {
             double normWidth,
             double normHeight) throws IOException {
         Path path = resolveSafePath(storagePath);
+        ensureOriginalBackup(path);
         BufferedImage source = ImageIO.read(path.toFile());
         if (source == null) {
-            throw new IOException("Cannot read image at " + storagePath);
+            throw new IllegalArgumentException("Cannot read image at " + storagePath);
         }
-
-        double x0 = clamp(normX);
-        double y0 = clamp(normY);
-        double wNorm = clamp(normWidth);
-        double hNorm = clamp(normHeight);
-        if (wNorm <= 0 || hNorm <= 0) {
-            throw new IllegalArgumentException("Redaction rectangle width and height must be positive");
-        }
-
-        int width = source.getWidth();
-        int height = source.getHeight();
-        int px = (int) Math.round(x0 * width);
-        int py = (int) Math.round(y0 * height);
-        int pw = Math.max(1, (int) Math.round(Math.min(1.0 - x0, wNorm) * width));
-        int ph = Math.max(1, (int) Math.round(Math.min(1.0 - y0, hNorm) * height));
 
         BufferedImage canvas = toRgbImage(source);
-        Graphics2D g2d = canvas.createGraphics();
-        try {
-            g2d.setColor(Color.BLACK);
-            g2d.fillRect(px, py, pw, ph);
-        } finally {
-            g2d.dispose();
+        drawRedactionBoxes(canvas, List.of(new RedactionBox(normX, normY, normWidth, normHeight)));
+        ImageIO.write(canvas, PNG_FORMAT, path.toFile());
+    }
+
+    /**
+     * Re-renders the stored PNG from its unredacted original backup by burning
+     * all supplied {@link RedactionBox} entries onto it, enabling lossless undo
+     * and full redaction reset without leaking unredacted pixels into the
+     * AI-facing image file.
+     */
+    public void renderRedactedImage(String storagePath, List<RedactionBox> boxes) throws IOException {
+        Path path = resolveSafePath(storagePath);
+        Path origPath = ensureOriginalBackup(path);
+        BufferedImage source = ImageIO.read(origPath.toFile());
+        if (source == null) {
+            throw new IOException("Cannot read original image at " + origPath.getFileName());
+        }
+
+        BufferedImage canvas = toRgbImage(source);
+        if (boxes != null && !boxes.isEmpty()) {
+            drawRedactionBoxes(canvas, boxes);
         }
         ImageIO.write(canvas, PNG_FORMAT, path.toFile());
     }
@@ -179,8 +182,59 @@ public class ScanStorageService {
         try {
             Path path = resolveSafePath(storagePath);
             Files.deleteIfExists(path);
+            Files.deleteIfExists(resolveOriginalPath(path));
         } catch (IOException ignored) {
             // Best-effort cleanup
+        }
+    }
+
+    private void rotateFileInPlace(Path path, int degreesClockwise) throws IOException {
+        BufferedImage source = ImageIO.read(path.toFile());
+        if (source == null) {
+            throw new IOException("Cannot read image at " + path.getFileName());
+        }
+        BufferedImage rotated = rotateClockwise(source, degreesClockwise);
+        ImageIO.write(rotated, PNG_FORMAT, path.toFile());
+    }
+
+    private static Path ensureOriginalBackup(Path targetPath) throws IOException {
+        Path origPath = resolveOriginalPath(targetPath);
+        if (!Files.exists(origPath) && Files.exists(targetPath)) {
+            Files.copy(targetPath, origPath, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return origPath;
+    }
+
+    static Path resolveOriginalPath(Path targetPath) {
+        String name = targetPath.getFileName().toString();
+        String origName = name.endsWith(".png")
+                ? name.substring(0, name.length() - 4) + ".orig.png"
+                : name + ".orig.png";
+        return targetPath.resolveSibling(origName);
+    }
+
+    private static void drawRedactionBoxes(BufferedImage canvas, List<RedactionBox> boxes) {
+        int width = canvas.getWidth();
+        int height = canvas.getHeight();
+        Graphics2D g2d = canvas.createGraphics();
+        try {
+            g2d.setColor(Color.BLACK);
+            for (RedactionBox box : boxes) {
+                double x0 = clamp(box.x());
+                double y0 = clamp(box.y());
+                double wNorm = clamp(box.width());
+                double hNorm = clamp(box.height());
+                if (wNorm <= 0 || hNorm <= 0) {
+                    throw new IllegalArgumentException("Redaction rectangle width and height must be positive");
+                }
+                int px = (int) Math.round(x0 * width);
+                int py = (int) Math.round(y0 * height);
+                int pw = Math.max(1, (int) Math.round(Math.min(1.0 - x0, wNorm) * width));
+                int ph = Math.max(1, (int) Math.round(Math.min(1.0 - y0, hNorm) * height));
+                g2d.fillRect(px, py, pw, ph);
+            }
+        } finally {
+            g2d.dispose();
         }
     }
 

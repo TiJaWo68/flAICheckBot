@@ -51,6 +51,16 @@ class ScanStorageServiceTest {
         BufferedImage redacted = ImageIO.read(new ByteArrayInputStream(service.readImageBytes(storedPath)));
         assertThat(new Color(redacted.getRGB(50, 10))).isEqualTo(Color.BLACK);
         assertThat(new Color(redacted.getRGB(50, 150))).isEqualTo(Color.WHITE);
+
+        service.renderRedactedImage(storedPath, List.of(new RedactionBox(0.0, 0.5, 1.0, 0.25)));
+        BufferedImage reRendered = ImageIO.read(new ByteArrayInputStream(service.readImageBytes(storedPath)));
+        assertThat(new Color(reRendered.getRGB(50, 10))).isEqualTo(Color.WHITE);
+        assertThat(new Color(reRendered.getRGB(50, 110))).isEqualTo(Color.BLACK);
+
+        service.renderRedactedImage(storedPath, List.of());
+        BufferedImage restored = ImageIO.read(new ByteArrayInputStream(service.readImageBytes(storedPath)));
+        assertThat(new Color(restored.getRGB(50, 10))).isEqualTo(Color.WHITE);
+        assertThat(new Color(restored.getRGB(50, 110))).isEqualTo(Color.WHITE);
     }
 
     @Test

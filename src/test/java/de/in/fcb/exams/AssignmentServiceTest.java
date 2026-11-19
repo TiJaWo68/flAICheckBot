@@ -126,4 +126,25 @@ class AssignmentServiceTest {
         assertThat(updated.getAchievedPoints()).isEqualByComparingTo("9.5");
         assertThat(updated.getRecognizedText()).isEqualTo("Corrected text");
     }
+
+    @Test
+    void supportsAddingUndoingAndClearingRedactions() throws Exception {
+        UUID pageId = UUID.randomUUID();
+        StudentWorkPage page = new StudentWorkPage();
+        page.setId(pageId);
+        page.setStoragePath("a/b/page-1.png");
+        when(pageRepository.findById(pageId)).thenReturn(Optional.of(page));
+        when(pageRepository.save(any(StudentWorkPage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.redactPage(pageId, 0.1, 0.1, 0.5, 0.1);
+        service.redactPage(pageId, 0.2, 0.3, 0.4, 0.1);
+        assertThat(service.parseRedactionBoxes(page.getRedactionBoxesJson())).hasSize(2);
+
+        assertThat(service.undoLastRedaction(pageId)).isTrue();
+        assertThat(service.parseRedactionBoxes(page.getRedactionBoxesJson())).hasSize(1);
+
+        assertThat(service.clearRedactions(pageId)).isTrue();
+        assertThat(service.parseRedactionBoxes(page.getRedactionBoxesJson())).isEmpty();
+        assertThat(service.undoLastRedaction(pageId)).isFalse();
+    }
 }
